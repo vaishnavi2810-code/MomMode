@@ -111,7 +111,7 @@ const DashboardPage = () => {
         ))}
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-[2.1fr_1fr]">
+      <div className="grid gap-6 lg:grid-cols-[2.1fr_1fr] lg:items-start">
         <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-soft">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <h2 className="text-lg font-semibold text-slate-900">Reminder Calls Scheduled Today</h2>
@@ -164,12 +164,14 @@ const DashboardPage = () => {
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-semibold text-slate-900">Recent activity</h2>
           </div>
-          <ul className="relative mt-6 space-y-6 border-l border-slate-200 pl-5">
+          <ul className="relative mt-6 space-y-5 pl-8 before:absolute before:left-3 before:top-2 before:h-[calc(100%-8px)] before:w-px before:bg-slate-200">
             {recentActivity.map((activity) => (
               <li key={activity.detail} className="relative">
-                <span className="absolute -left-[11px] top-1 h-3.5 w-3.5 rounded-full border-2 border-white bg-primary shadow-sm ring-4 ring-primary/10"></span>
+                <span className="absolute left-[5px] top-1 flex h-4 w-4 items-center justify-center rounded-full bg-white ring-2 ring-primary/15">
+                  <span className="h-2 w-2 rounded-full bg-primary"></span>
+                </span>
                 <p className="text-sm font-semibold text-slate-900">{activity.detail}</p>
-                <p className="text-xs text-slate-500">{activity.time}</p>
+                <p className="text-xs font-medium text-slate-500">{activity.time}</p>
               </li>
             ))}
           </ul>
