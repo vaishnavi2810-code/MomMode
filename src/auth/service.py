@@ -21,6 +21,9 @@ from colorama import Fore, init
 
 init(autoreset=True)
 
+OAUTH_USERINFO_API_NAME = "oauth2"
+OAUTH_USERINFO_API_VERSION = "v2"
+
 # ============================================================================
 # JWT TOKEN MANAGEMENT
 # ============================================================================

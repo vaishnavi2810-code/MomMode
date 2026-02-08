@@ -1,5 +1,5 @@
 """
-CallPilot Configuration
+Configuration loader for CallPilot application.
 
 Loads and validates all environment variables from .env file.
 Combines Pydantic settings with direct environment variable loading.
