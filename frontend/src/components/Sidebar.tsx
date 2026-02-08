@@ -45,7 +45,6 @@ const EMPTY_STRING = ''
 
 const navItems = [
   { label: NAV_LABEL_SUMMARY, to: ROUTE_APP, icon: CalendarDays },
-  { label: NAV_LABEL_DASHBOARD, to: ROUTE_DASHBOARD, icon: LayoutDashboard },
   { label: NAV_LABEL_APPOINTMENTS, to: ROUTE_APPOINTMENTS, icon: CalendarCheck },
   { label: NAV_LABEL_PATIENTS, to: ROUTE_PATIENTS, icon: UsersRound },
   { label: NAV_LABEL_CALLS, to: ROUTE_CALLS, icon: PhoneCall },
