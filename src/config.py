@@ -181,6 +181,19 @@ APP_VERSION = get_optional_var("APP_VERSION", "0.1.0")
 DEBUG = get_optional_var("DEBUG", "false").lower() == "true"
 LOG_LEVEL = get_optional_var("LOG_LEVEL", "INFO")
 API_BASE_URL = get_optional_var("API_BASE_URL", "http://localhost:8000")
+DEFAULT_CORS_ALLOWED_ORIGINS = "http://localhost:5173"
+CORS_ALLOWED_ORIGINS_SEPARATOR = ","
+CORS_ALLOWED_ORIGINS_RAW = get_optional_var("CORS_ALLOWED_ORIGINS", DEFAULT_CORS_ALLOWED_ORIGINS)
+CORS_ALLOWED_ORIGINS = [
+    origin.strip()
+    for origin in CORS_ALLOWED_ORIGINS_RAW.split(CORS_ALLOWED_ORIGINS_SEPARATOR)
+    if origin.strip()
+]
+DEFAULT_FRONTEND_OAUTH_REDIRECT_URL = "http://localhost:5173/oauth/callback"
+FRONTEND_OAUTH_REDIRECT_URL = get_optional_var(
+    "FRONTEND_OAUTH_REDIRECT_URL",
+    DEFAULT_FRONTEND_OAUTH_REDIRECT_URL
+)
 
 # ============================================================================
 # WEBHOOK CONFIG
