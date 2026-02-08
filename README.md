@@ -27,6 +27,12 @@ Google Calendar API (OAuth 2.0)
 Google Calendar Storage
 ```
 
+## 🔧 System Architecture Diagram: 
+<img src="res/System-diag.png" alt="System Architecture" width="600"/>
+
+## 🎭 Use Case Diagram: 
+<img src="res/use-case-diag.png" alt="System Architecture"/>
+
 ## 🛠️ Tech Stack
 
 | Technology | Role |
