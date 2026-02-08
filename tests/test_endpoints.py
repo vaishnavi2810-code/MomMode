@@ -3,7 +3,7 @@ CallPilot API Endpoint Tests
 
 Run with: python3 tests/test_endpoints.py
 
-Make sure the server is running: python3 -m uvicorn main:app --reload --port 8000
+Make sure the server is running: python3 -m uvicorn src.api.main:app --reload --port 8000
 """
 
 import requests

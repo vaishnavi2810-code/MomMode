@@ -3,7 +3,7 @@ CallPilot API - Main Entry Point
 
 AI Voice Agent API for Medical Appointment Scheduling.
 
-Run with: uvicorn main:app --reload --port 8000
+Run with: uvicorn src.api.main:app --reload --port 8000
 """
 
 from fastapi import FastAPI
@@ -71,7 +71,7 @@ def root():
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(
-        "main:app",
+        "src.api.main:app",
         host=app_config.host,
         port=app_config.port,
         reload=app_config.debug

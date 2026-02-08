@@ -72,9 +72,9 @@ pip install -r requirements.txt
 3. Run the API server:
 
 ```bash
-python3 main.py
+python3 -m src.api.main
 # or
-uvicorn main:app --reload --port 8000
+uvicorn src.api.main:app --reload --port 8000
 ```
 
 The API will be available at `http://localhost:8000` with interactive documentation at `http://localhost:8000/docs`.
