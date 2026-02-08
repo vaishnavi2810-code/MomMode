@@ -661,6 +661,35 @@ def handle_google_oauth_callback(
         )
 
 
+@app.post("/api/auth/logout")
+async def logout(
+    current_user: str = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Logout the current user by invalidating all active sessions.
+    """
+    try:
+        sessions = db.query(database.UserSession).filter(
+            database.UserSession.user_id == current_user,
+            database.UserSession.is_active == True
+        ).all()
+
+        for session in sessions:
+            session.is_active = False
+
+        db.commit()
+
+        return {"success": True, "message": "Logged out successfully"}
+
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to logout: {str(e)}"
+        )
+
+
 # ============================================================================
 # DOCTOR ENDPOINTS (/api/doctors)
 # ============================================================================
@@ -1321,52 +1350,136 @@ async def create_appointment(
 
 
 @app.put("/api/appointments/{appointment_id}", response_model=models.AppointmentResponse)
-async def update_appointment(appointment_id: str, request: models.AppointmentUpdate):
+async def update_appointment(
+    appointment_id: str,
+    request: models.AppointmentUpdate,
+    current_user: str = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
     """
-    Update appointment
+    Update an existing appointment's details in the database.
+    """
+    appointment = db.query(database.Appointment).filter(
+        database.Appointment.doctor_id == current_user,
+        database.Appointment.id == appointment_id
+    ).first()
 
-    TODO: Add JWT authentication
-    TODO: Update Google Calendar event
-    TODO: Update database
-    """
-    return {
-        "id": appointment_id,
-        "calendar_event_id": None,
-        "patient_id": "pat_placeholder",
-        "patient_name": "Patient Name",
-        "date": request.date or "2026-02-15",
-        "time": request.time or "14:00",
-        "duration_minutes": config.APPOINTMENT_DURATION_MINUTES,
-        "type": request.type or "General Checkup",
-        "status": request.status or "scheduled",
-        "notes": request.notes,
-        "reminder_sent": False,
-        "created_at": datetime.utcnow()
-    }
+    if not appointment:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=ERROR_APPOINTMENT_NOT_FOUND
+        )
+
+    try:
+        if request.date is not None:
+            appointment.date = request.date
+        if request.time is not None:
+            appointment.time = request.time
+        if request.type is not None:
+            appointment.type = request.type
+        if request.notes is not None:
+            appointment.notes = request.notes
+        if request.status is not None:
+            appointment.status = request.status
+
+        appointment.updated_at = datetime.utcnow()
+        db.commit()
+        db.refresh(appointment)
+
+        patient_name = appointment.patient.name if appointment.patient else APPOINTMENT_SUMMARY_FALLBACK
+
+        return {
+            "id": appointment.id,
+            "calendar_event_id": appointment.calendar_event_id,
+            "patient_id": appointment.patient_id,
+            "patient_name": patient_name,
+            "date": appointment.date,
+            "time": appointment.time,
+            "duration_minutes": appointment.duration_minutes or config.APPOINTMENT_DURATION_MINUTES,
+            "type": appointment.type,
+            "status": appointment.status,
+            "notes": appointment.notes,
+            "reminder_sent": appointment.reminder_sent or False,
+            "created_at": appointment.created_at,
+        }
+
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to update appointment: {str(e)}"
+        )
 
 
 @app.delete("/api/appointments/{appointment_id}")
-async def delete_appointment(appointment_id: str):
+async def delete_appointment(
+    appointment_id: str,
+    current_user: str = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
     """
-    Delete/cancel appointment
+    Cancel an appointment by setting its status to cancelled.
+    """
+    appointment = db.query(database.Appointment).filter(
+        database.Appointment.doctor_id == current_user,
+        database.Appointment.id == appointment_id
+    ).first()
 
-    TODO: Add JWT authentication
-    TODO: Delete from Google Calendar
-    TODO: Update database
-    TODO: Notify patient via SMS
-    """
-    return {"success": True, "message": f"Appointment {appointment_id} cancelled"}
+    if not appointment:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=ERROR_APPOINTMENT_NOT_FOUND
+        )
+
+    try:
+        appointment.status = APPOINTMENT_STATUS_CANCELLED
+        appointment.updated_at = datetime.utcnow()
+        db.commit()
+
+        return {"success": True, "message": f"Appointment {appointment_id} cancelled"}
+
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to cancel appointment: {str(e)}"
+        )
 
 
 @app.post("/api/appointments/{appointment_id}/confirm")
-async def confirm_appointment(appointment_id: str, request: models.AppointmentConfirm):
+async def confirm_appointment(
+    appointment_id: str,
+    request: models.AppointmentConfirm,
+    current_user: str = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
     """
-    Confirm appointment (patient callback from reminder)
+    Confirm an appointment by setting its status to confirmed.
+    """
+    appointment = db.query(database.Appointment).filter(
+        database.Appointment.doctor_id == current_user,
+        database.Appointment.id == appointment_id
+    ).first()
 
-    TODO: Update appointment status in database
-    TODO: Update Google Calendar event
-    """
-    return {"success": True, "message": "Appointment confirmed"}
+    if not appointment:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=ERROR_APPOINTMENT_NOT_FOUND
+        )
+
+    try:
+        appointment.status = "confirmed"
+        appointment.updated_at = datetime.utcnow()
+        db.commit()
+
+        return {"success": True, "message": "Appointment confirmed"}
+
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to confirm appointment: {str(e)}"
+        )
 
 
 @app.post("/api/appointments/{appointment_id}/no-show")
