@@ -538,47 +538,57 @@ def handle_google_oauth_callback(
     Handle Google OAuth callback.
 
     1. User authorizes, Google redirects with code
-    2. Backend exchanges code for OAuth token (saved to file)
-    3. User can now access Google Calendar
+    2. Backend exchanges code for OAuth token
+    3. Backend fetches user info from Google
+    4. Backend creates/updates user and session in DB
 
     Args:
         code: Authorization code from Google
         state: State token for CSRF protection
+        db: Database session
+        redirect_on_success: Whether to redirect on success (GET flow)
+        redirect_on_error: Whether to redirect on error (GET flow)
 
     Returns:
-        success: True if authentication succeeded
-        email: User's email address
-        message: Status message
+        JSON response or RedirectResponse with tokens
     """
     print(f"{Fore.CYAN}[AUTH] === GOOGLE OAUTH CALLBACK HANDLER START ===")
     try:
-        # Exchange Google auth code for OAuth token
+        # Exchange Google auth code for OAuth token (single exchange)
         oauth_token = auth_service.exchange_oauth_code_for_token(
             code,
             state
         )
 
         if not oauth_token:
+            print(f"{Fore.RED}[AUTH] ❌ Token exchange returned None")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail=OAUTH_ERROR_EXCHANGE_FAILED
             )
 
-        # Use GoogleAuthManager to handle the callback
-        success, message, email = google_auth.handle_callback(code)
+        print(f"{Fore.GREEN}[AUTH] ✅ Token exchange successful")
 
-        if not success:
-            print(f"{Fore.RED}[AUTH] ❌ handle_callback failed: {message}")
+        # Get user info from Google using the access token
+        access_token = oauth_token.get("access_token")
+        user_info = auth_service.get_user_info_from_google(access_token)
+
+        if not user_info or not user_info.get("email"):
+            print(f"{Fore.RED}[AUTH] ❌ Failed to get user info from Google")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail=OAUTH_ERROR_USERINFO_FAILED
             )
 
+        email = user_info["email"]
+        name = user_info.get("name", "")
+        print(f"{Fore.GREEN}[AUTH] ✅ Got user info: {email}")
+
         # Create or update user with OAuth token
         user = auth_service.create_or_update_user(
             db=db,
-            email=user_info["email"],
-            name=user_info.get("name", ""),
+            email=email,
+            name=name,
             oauth_token_data=oauth_token
         )
 
@@ -588,9 +598,8 @@ def handle_google_oauth_callback(
                 detail=OAUTH_ERROR_CREATE_USER_FAILED
             )
 
-        print(f"{Fore.GREEN}[AUTH] ✅ OAuth authentication successful")
-        print(f"{Fore.CYAN}[AUTH]   Email: {email}")
-        print(f"{Fore.CYAN}[AUTH]   Message: {message}")
+        # Create session with JWT tokens
+        session = auth_service.create_session(db, user.id)
 
         if not session:
             raise HTTPException(
@@ -598,10 +607,16 @@ def handle_google_oauth_callback(
                 detail=OAUTH_ERROR_CREATE_SESSION_FAILED
             )
 
-        return {
-            "success": True,
-            "email": email,
-            "message": message
+        print(f"{Fore.GREEN}[AUTH] ✅ OAuth authentication successful")
+        print(f"{Fore.CYAN}[AUTH]   Email: {email}")
+        print(f"{Fore.CYAN}[AUTH]   User ID: {user.id}")
+
+        response_payload = {
+            OAUTH_REDIRECT_PARAM_ACCESS_TOKEN: session.access_token,
+            OAUTH_REDIRECT_PARAM_REFRESH_TOKEN: session.refresh_token,
+            OAUTH_REDIRECT_PARAM_TOKEN_TYPE: OAUTH_TOKEN_TYPE_BEARER,
+            OAUTH_REDIRECT_PARAM_EXPIRES_IN: config.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+            OAUTH_REDIRECT_PARAM_USER_ID: user.id,
         }
 
         if redirect_on_success and config.FRONTEND_OAUTH_REDIRECT_URL:
@@ -614,6 +629,7 @@ def handle_google_oauth_callback(
         return response_payload
 
     except HTTPException as exc:
+        print(f"{Fore.RED}[AUTH] ❌ HTTPException in callback: {exc.detail}")
         if redirect_on_error and config.FRONTEND_OAUTH_REDIRECT_URL:
             error_payload = {
                 OAUTH_REDIRECT_PARAM_ERROR: OAUTH_ERROR_GENERIC,
@@ -626,6 +642,9 @@ def handle_google_oauth_callback(
             return RedirectResponse(url=redirect_url)
         raise
     except Exception as e:
+        print(f"{Fore.RED}[AUTH] ❌ Unexpected error in callback: {str(e)}")
+        import traceback
+        traceback.print_exc()
         if redirect_on_error and config.FRONTEND_OAUTH_REDIRECT_URL:
             error_payload = {
                 OAUTH_REDIRECT_PARAM_ERROR: OAUTH_ERROR_GENERIC,
@@ -636,14 +655,6 @@ def handle_google_oauth_callback(
                 error_payload
             )
             return RedirectResponse(url=redirect_url)
-    except HTTPException as e:
-        print(f"{Fore.RED}[AUTH] ❌ HTTPException in callback: {e.detail}")
-        raise
-    except Exception as e:
-        print(f"{Fore.RED}[AUTH] ❌ Unexpected error in callback: {str(e)}")
-        import traceback
-        print(f"{Fore.RED}[AUTH] Traceback:")
-        traceback.print_exc()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=OAUTH_CALLBACK_ERROR_TEMPLATE.format(error=str(e))
