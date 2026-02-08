@@ -6,7 +6,7 @@
       "name": "check_availability",
       "description": "Check available appointment times for a specific date. Use this when the patient asks about availability on a specific day.",
       "api_schema": {
-        "url": "https://trieciously-unpumped-ora.ngrok-free.dev/api/calendar/availability",
+        "url": "https://auscultative-diffractive-margert.ngrok-free.dev/api/agent/calendar/availability",
         "method": "POST",
         "path_params_schema": [],
         "query_params_schema": [],
@@ -54,7 +54,7 @@
       "name": "list_my_appointments",
       "description": "Retrieve all upcoming appointments for the patient. Use this when the patient asks 'what are my appointments' or 'when is my next appointment'.",
       "api_schema": {
-        "url": "https://trieciously-unpumped-ora.ngrok-free.dev/api/appointments/list",
+        "url": "https://auscultative-diffractive-margert.ngrok-free.dev/api/agent/appointments/list",
         "method": "POST",
         "path_params_schema": [],
         "query_params_schema": [],
@@ -102,7 +102,7 @@
       "name": "schedule_appointment",
       "description": "Schedule a new appointment. Use this when the patient has selected a date and time they want to book.",
       "api_schema": {
-        "url": "https://trieciously-unpumped-ora.ngrok-free.dev/api/appointments/schedule",
+        "url": "https://auscultative-diffractive-margert.ngrok-free.dev/api/agent/appointments/schedule",
         "method": "POST",
         "path_params_schema": [],
         "query_params_schema": [],
@@ -186,7 +186,7 @@
       "name": "reschedule_appointment",
       "description": "Reschedule an existing appointment to a new date and time.",
       "api_schema": {
-        "url": "https://trieciously-unpumped-ora.ngrok-free.dev/api/appointments/reschedule",
+        "url": "https://auscultative-diffractive-margert.ngrok-free.dev/api/agent/appointments/reschedule",
         "method": "POST",
         "path_params_schema": [],
         "query_params_schema": [],
@@ -261,7 +261,7 @@
       "name": "cancel_appointment",
       "description": "Cancel an existing appointment. Use this when the patient wants to cancel an appointment.",
       "api_schema": {
-        "url": "https://trieciously-unpumped-ora.ngrok-free.dev/api/appointments/cancel",
+        "url": "https://auscultative-diffractive-margert.ngrok-free.dev/api/agent/appointments/cancel",
         "method": "POST",
         "path_params_schema": [],
         "query_params_schema": [],
