@@ -144,7 +144,7 @@ const AppointmentsPage = () => {
 
   const loadAppointments = async () => {
     setStatusMessage(STATUS_LOADING)
-    const result = await apiRequest<AppointmentRecord[]>(API_PATHS.APPOINTMENTS, {
+    const result = await apiRequest<AppointmentRecord[]>(API_PATHS.CALENDAR_APPOINTMENTS, {
       method: HTTP.GET,
       requiresAuth: true,
     })
