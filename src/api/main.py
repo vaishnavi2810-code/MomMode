@@ -11,8 +11,8 @@ Main FastAPI application with endpoints for:
 """
 
 import sys
-from datetime import datetime
-from typing import List, Optional
+from datetime import datetime, timedelta, time
+from typing import List, Optional, Dict
 from fastapi import FastAPI, HTTPException, Depends, status, Request, Query
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -20,6 +20,8 @@ from fastapi.security import HTTPBearer
 from urllib.parse import urlencode
 from starlette.authentication import AuthCredentials, SimpleUser
 from colorama import Fore, init
+from googleapiclient.discovery import build
+import pytz
 
 from src import config
 from src.core import models
@@ -35,12 +37,59 @@ OAUTH_REDIRECT_PARAM_REFRESH_TOKEN = "refresh_token"
 OAUTH_REDIRECT_PARAM_TOKEN_TYPE = "token_type"
 OAUTH_REDIRECT_PARAM_EXPIRES_IN = "expires_in"
 OAUTH_REDIRECT_PARAM_USER_ID = "user_id"
+OAUTH_REDIRECT_PARAM_ERROR = "error"
+OAUTH_REDIRECT_PARAM_ERROR_DESCRIPTION = "error_description"
 OAUTH_REDIRECT_QUERY_SEPARATOR = "?"
 OAUTH_REDIRECT_APPEND_SEPARATOR = "&"
 OAUTH_TOKEN_TYPE_BEARER = "bearer"
+OAUTH_CALLBACK_ERROR_TEMPLATE = "OAuth callback failed: {error}"
+OAUTH_ERROR_EXCHANGE_FAILED = "Failed to exchange authorization code"
+OAUTH_ERROR_USERINFO_FAILED = "Failed to get user info from Google"
+OAUTH_ERROR_CREATE_USER_FAILED = "Failed to create user account"
+OAUTH_ERROR_CREATE_SESSION_FAILED = "Failed to create session"
+OAUTH_ERROR_GENERIC = "Unable to complete Google sign-in"
+ERROR_DOCTOR_NOT_FOUND = "Doctor account not found."
+DEFAULT_DOCTOR_PHONE = ""
+ERROR_CALENDAR_NOT_CONNECTED = "Calendar is not connected."
+ERROR_CALENDAR_DATE_INVALID = "Invalid date. Use YYYY-MM-DD or 'today'."
+ERROR_CALENDAR_FETCH_FAILED = "Failed to fetch calendar appointments."
+CALENDAR_TIMEZONE_FALLBACK = "UTC"
 CORS_ALLOW_METHODS = ["*"]
 CORS_ALLOW_HEADERS = ["*"]
 CORS_ALLOW_CREDENTIALS = True
+GOOGLE_CALENDAR_API_NAME = "calendar"
+GOOGLE_CALENDAR_API_VERSION = "v3"
+GOOGLE_CALENDAR_ORDER_BY = "startTime"
+GOOGLE_CALENDAR_SINGLE_EVENTS = True
+GOOGLE_CALENDAR_START_FIELD = "start"
+GOOGLE_CALENDAR_DATE_TIME_FIELD = "dateTime"
+GOOGLE_CALENDAR_DATE_FIELD = "date"
+GOOGLE_CALENDAR_SUMMARY_FIELD = "summary"
+GOOGLE_CALENDAR_DESCRIPTION_FIELD = "description"
+GOOGLE_CALENDAR_STATUS_FIELD = "status"
+GOOGLE_CALENDAR_STATUS_CANCELLED = "cancelled"
+APPOINTMENT_SUMMARY_PREFIX = "Appointment:"
+APPOINTMENT_SUMMARY_FALLBACK = "Appointment"
+APPOINTMENT_STATUS_SCHEDULED = "scheduled"
+APPOINTMENT_STATUS_CANCELLED = "cancelled"
+APPOINTMENT_TYPE_FALLBACK = "General"
+DESCRIPTION_FIELD_SEPARATOR = ": "
+DESCRIPTION_FIELD_STATUS = "status"
+DESCRIPTION_FIELD_TYPE = "type"
+DESCRIPTION_KEY_SEPARATOR = " "
+DESCRIPTION_KEY_REPLACEMENT = "_"
+APPOINTMENT_TIME_ALL_DAY = "All day"
+DATE_INPUT_FORMAT = "%Y-%m-%d"
+DATE_OUTPUT_FORMAT = "%Y-%m-%d"
+TIME_OUTPUT_FORMAT = "%H:%M"
+DATE_QUERY_PARAM = "date"
+DAYS_AHEAD_QUERY_PARAM = "days_ahead"
+MAX_RESULTS_QUERY_PARAM = "max_results"
+DATE_VALUE_TODAY = "today"
+DATE_VALUE_TOMORROW = "tomorrow"
+DATE_RANGE_DAYS = 1
+DATETIME_UTC_SUFFIX = "Z"
+DATETIME_UTC_OFFSET = "+00:00"
 
 
 def build_oauth_redirect_url(base_url: str, payload: dict) -> str:
@@ -52,6 +101,121 @@ def build_oauth_redirect_url(base_url: str, payload: dict) -> str:
         else OAUTH_REDIRECT_QUERY_SEPARATOR
     )
     return f"{base_url}{separator}{query_string}"
+
+
+def parse_calendar_date(date_value: str, timezone: pytz.BaseTzInfo) -> datetime.date:
+    """Parse a calendar date string into a date."""
+    normalized = date_value.strip().lower()
+    today = datetime.now(timezone).date()
+
+    if normalized == DATE_VALUE_TODAY:
+        return today
+    if normalized == DATE_VALUE_TOMORROW:
+        return today + timedelta(days=DATE_RANGE_DAYS)
+
+    return datetime.strptime(normalized, DATE_INPUT_FORMAT).date()
+
+
+def resolve_time_window(
+    date_value: Optional[str],
+    days_ahead: Optional[int],
+    timezone: pytz.BaseTzInfo
+) -> tuple[datetime, datetime]:
+    """Resolve time window for calendar query."""
+    now = datetime.now(timezone)
+
+    if date_value:
+        target_date = parse_calendar_date(date_value, timezone)
+        day_start = timezone.localize(datetime.combine(target_date, time.min))
+        day_end = day_start + timedelta(days=DATE_RANGE_DAYS)
+        time_min = now if target_date == now.date() else day_start
+        return time_min, day_end
+
+    lookahead_days = days_ahead if days_ahead is not None else config.APPOINTMENTS_LOOKAHEAD_DAYS
+    return now, now + timedelta(days=lookahead_days)
+
+
+def normalize_summary(summary: Optional[str]) -> str:
+    """Normalize Google Calendar event summary to a patient label."""
+    if not summary:
+        return APPOINTMENT_SUMMARY_FALLBACK
+
+    trimmed = summary.strip()
+    if trimmed.lower().startswith(APPOINTMENT_SUMMARY_PREFIX.lower()):
+        without_prefix = trimmed[len(APPOINTMENT_SUMMARY_PREFIX):].strip()
+        return without_prefix or APPOINTMENT_SUMMARY_FALLBACK
+
+    return trimmed
+
+
+def parse_description_fields(description: Optional[str]) -> Dict[str, str]:
+    """Parse structured fields from event description."""
+    if not description:
+        return {}
+
+    parsed: Dict[str, str] = {}
+    for line in description.splitlines():
+        if DESCRIPTION_FIELD_SEPARATOR not in line:
+            continue
+        key, value = line.split(DESCRIPTION_FIELD_SEPARATOR, 1)
+        normalized_key = key.strip().lower().replace(DESCRIPTION_KEY_SEPARATOR, DESCRIPTION_KEY_REPLACEMENT)
+        parsed[normalized_key] = value.strip()
+    return parsed
+
+
+def parse_event_datetime(value: Optional[str], timezone: pytz.BaseTzInfo) -> Optional[datetime]:
+    """Parse Google event datetime into localized datetime."""
+    if not value:
+        return None
+    normalized = value
+    if normalized.endswith(DATETIME_UTC_SUFFIX):
+        normalized = normalized.replace(DATETIME_UTC_SUFFIX, DATETIME_UTC_OFFSET, 1)
+    parsed = datetime.fromisoformat(normalized)
+    if parsed.tzinfo is None:
+        return timezone.localize(parsed)
+    return parsed.astimezone(timezone)
+
+
+def map_event_to_appointment_record(
+    event: dict,
+    timezone: pytz.BaseTzInfo
+) -> models.CalendarAppointmentRecord:
+    """Map Google Calendar event to appointment record."""
+    summary = normalize_summary(event.get(GOOGLE_CALENDAR_SUMMARY_FIELD))
+    description = event.get(GOOGLE_CALENDAR_DESCRIPTION_FIELD)
+    parsed_description = parse_description_fields(description)
+
+    appointment_type = parsed_description.get(DESCRIPTION_FIELD_TYPE, APPOINTMENT_TYPE_FALLBACK)
+    status = parsed_description.get(DESCRIPTION_FIELD_STATUS, APPOINTMENT_STATUS_SCHEDULED)
+
+    google_status = event.get(GOOGLE_CALENDAR_STATUS_FIELD)
+    if google_status == GOOGLE_CALENDAR_STATUS_CANCELLED:
+        status = APPOINTMENT_STATUS_CANCELLED
+
+    start_payload = event.get(GOOGLE_CALENDAR_START_FIELD, {})
+    start_date_time = start_payload.get(GOOGLE_CALENDAR_DATE_TIME_FIELD)
+    start_date = start_payload.get(GOOGLE_CALENDAR_DATE_FIELD)
+
+    if start_date_time:
+        start_dt = parse_event_datetime(start_date_time, timezone)
+        date_label = start_dt.strftime(DATE_OUTPUT_FORMAT) if start_dt else ""
+        time_label = start_dt.strftime(TIME_OUTPUT_FORMAT) if start_dt else APPOINTMENT_TIME_ALL_DAY
+    elif start_date:
+        date_label = start_date
+        time_label = APPOINTMENT_TIME_ALL_DAY
+    else:
+        date_label = ""
+        time_label = APPOINTMENT_TIME_ALL_DAY
+
+    return models.CalendarAppointmentRecord(
+        id=event.get("id", ""),
+        patient_id=event.get("id"),
+        patient_name=summary,
+        date=date_label,
+        time=time_label,
+        type=appointment_type,
+        status=status
+    )
 
 # ============================================================================
 # APPLICATION SETUP
@@ -187,7 +351,13 @@ async def google_oauth_callback(
     request: models.CalendarCallback,
     db: Session = Depends(get_db)
 ):
-    return handle_google_oauth_callback(request.code, request.state, db)
+    return handle_google_oauth_callback(
+        request.code,
+        request.state,
+        db,
+        redirect_on_success=False,
+        redirect_on_error=False
+    )
 
 
 @app.get("/api/auth/google/callback")
@@ -196,10 +366,22 @@ async def google_oauth_callback_get(
     state: str = Query(...),
     db: Session = Depends(get_db)
 ):
-    return handle_google_oauth_callback(code, state, db)
+    return handle_google_oauth_callback(
+        code,
+        state,
+        db,
+        redirect_on_success=True,
+        redirect_on_error=True
+    )
 
 
-def handle_google_oauth_callback(code: str, state: str, db: Session):
+def handle_google_oauth_callback(
+    code: str,
+    state: str,
+    db: Session,
+    redirect_on_success: bool,
+    redirect_on_error: bool
+):
     """
     Handle Google OAuth callback.
 
@@ -231,7 +413,7 @@ def handle_google_oauth_callback(code: str, state: str, db: Session):
         if not oauth_token:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Failed to exchange authorization code"
+                detail=OAUTH_ERROR_EXCHANGE_FAILED
             )
 
         # Get user info from Google
@@ -242,7 +424,7 @@ def handle_google_oauth_callback(code: str, state: str, db: Session):
         if not user_info:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Failed to get user info from Google"
+                detail=OAUTH_ERROR_USERINFO_FAILED
             )
 
         # Create or update user with OAuth token
@@ -256,7 +438,7 @@ def handle_google_oauth_callback(code: str, state: str, db: Session):
         if not user:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to create user account"
+                detail=OAUTH_ERROR_CREATE_USER_FAILED
             )
 
         # Create session with JWT tokens
@@ -265,7 +447,7 @@ def handle_google_oauth_callback(code: str, state: str, db: Session):
         if not session:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to create session"
+                detail=OAUTH_ERROR_CREATE_SESSION_FAILED
             )
 
         response_payload = {
@@ -276,7 +458,7 @@ def handle_google_oauth_callback(code: str, state: str, db: Session):
             OAUTH_REDIRECT_PARAM_USER_ID: user.id
         }
 
-        if config.FRONTEND_OAUTH_REDIRECT_URL:
+        if redirect_on_success and config.FRONTEND_OAUTH_REDIRECT_URL:
             redirect_url = build_oauth_redirect_url(
                 config.FRONTEND_OAUTH_REDIRECT_URL,
                 response_payload
@@ -285,12 +467,32 @@ def handle_google_oauth_callback(code: str, state: str, db: Session):
 
         return response_payload
 
-    except HTTPException:
+    except HTTPException as exc:
+        if redirect_on_error and config.FRONTEND_OAUTH_REDIRECT_URL:
+            error_payload = {
+                OAUTH_REDIRECT_PARAM_ERROR: OAUTH_ERROR_GENERIC,
+                OAUTH_REDIRECT_PARAM_ERROR_DESCRIPTION: str(exc.detail)
+            }
+            redirect_url = build_oauth_redirect_url(
+                config.FRONTEND_OAUTH_REDIRECT_URL,
+                error_payload
+            )
+            return RedirectResponse(url=redirect_url)
         raise
     except Exception as e:
+        if redirect_on_error and config.FRONTEND_OAUTH_REDIRECT_URL:
+            error_payload = {
+                OAUTH_REDIRECT_PARAM_ERROR: OAUTH_ERROR_GENERIC,
+                OAUTH_REDIRECT_PARAM_ERROR_DESCRIPTION: str(e)
+            }
+            redirect_url = build_oauth_redirect_url(
+                config.FRONTEND_OAUTH_REDIRECT_URL,
+                error_payload
+            )
+            return RedirectResponse(url=redirect_url)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"OAuth callback failed: {str(e)}"
+            detail=OAUTH_CALLBACK_ERROR_TEMPLATE.format(error=str(e))
         )
 
 
@@ -299,21 +501,33 @@ def handle_google_oauth_callback(code: str, state: str, db: Session):
 # ============================================================================
 
 @app.get("/api/doctors/me", response_model=models.DoctorProfile)
-async def get_doctor_profile():
+async def get_doctor_profile(
+    current_user: str = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
     """
     Get current doctor's profile
 
-    TODO: Extract doctor ID from JWT token
-    TODO: Fetch profile from database
+    Fetch profile from database.
     """
+    user = db.query(database.User).filter(
+        database.User.id == current_user
+    ).first()
+
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=ERROR_DOCTOR_NOT_FOUND
+        )
+
     return {
-        "id": "doc_placeholder",
-        "email": config.DOCTOR_EMAIL,
-        "name": "Dr. Placeholder",
-        "phone": "+1234567890",
-        "timezone": config.DOCTOR_TIMEZONE,
-        "calendar_connected": False,
-        "created_at": datetime.utcnow()
+        "id": user.id,
+        "email": user.email,
+        "name": user.name,
+        "phone": user.phone or DEFAULT_DOCTOR_PHONE,
+        "timezone": user.timezone or config.DOCTOR_TIMEZONE,
+        "calendar_connected": bool(user.google_oauth_token),
+        "created_at": user.created_at
     }
 
 
@@ -455,6 +669,83 @@ async def check_availability_endpoint(
             "date": request.date,
             "error": f"Calendar check failed: {str(e)}"
         }
+
+
+@app.get("/api/calendar/appointments", response_model=List[models.CalendarAppointmentRecord])
+async def list_calendar_appointments(
+    date: Optional[str] = Query(None, alias=DATE_QUERY_PARAM),
+    days_ahead: Optional[int] = Query(None, alias=DAYS_AHEAD_QUERY_PARAM),
+    max_results: Optional[int] = Query(None, alias=MAX_RESULTS_QUERY_PARAM),
+    current_user: str = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    List appointments from the logged-in doctor's Google Calendar.
+    """
+    try:
+        user = auth_service.get_user_by_id(db, current_user)
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=ERROR_DOCTOR_NOT_FOUND
+            )
+
+        oauth_token = auth_service.get_user_oauth_token(db, current_user)
+        if not oauth_token:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail=ERROR_CALENDAR_NOT_CONNECTED
+            )
+
+        credentials = auth_service.build_google_credentials(oauth_token)
+        if not credentials:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail=ERROR_CALENDAR_NOT_CONNECTED
+            )
+
+        tz_name = user.timezone or config.DOCTOR_TIMEZONE
+        try:
+            timezone = pytz.timezone(tz_name)
+        except pytz.UnknownTimeZoneError:
+            timezone = pytz.timezone(CALENDAR_TIMEZONE_FALLBACK)
+
+        if days_ahead is not None and days_ahead <= 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=ERROR_CALENDAR_DATE_INVALID
+            )
+
+        time_min, time_max = resolve_time_window(date, days_ahead, timezone)
+        calendar_id = user.google_calendar_id or config.GOOGLE_CALENDAR_ID
+        limit = max_results if max_results is not None else config.CALENDAR_MAX_RESULTS
+
+        service = build(GOOGLE_CALENDAR_API_NAME, GOOGLE_CALENDAR_API_VERSION, credentials=credentials)
+        result = service.events().list(
+            calendarId=calendar_id,
+            timeMin=time_min.isoformat(),
+            timeMax=time_max.isoformat(),
+            maxResults=limit,
+            singleEvents=GOOGLE_CALENDAR_SINGLE_EVENTS,
+            orderBy=GOOGLE_CALENDAR_ORDER_BY,
+            timeZone=timezone.zone
+        ).execute()
+
+        events = result.get("items", [])
+        return [map_event_to_appointment_record(event, timezone) for event in events]
+
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=ERROR_CALENDAR_DATE_INVALID
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"{ERROR_CALENDAR_FETCH_FAILED} {str(e)}"
+        )
 
 
 # ============================================================================
