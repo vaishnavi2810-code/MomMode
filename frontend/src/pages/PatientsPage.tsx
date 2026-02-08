@@ -1,26 +1,30 @@
-import { FileText, PhoneCall, Plus, Search, UsersRound } from 'lucide-react'
+import { Eye, PencilLine, Plus, Search, Trash2, UsersRound } from 'lucide-react'
 import StatusBadge from '../components/StatusBadge'
 
 const patients = [
   {
+    id: 'pat-001',
     name: 'Hannah Lee',
     lastVisit: 'Jan 28, 2026',
     nextStep: 'Annual physical follow-up',
     status: 'Active care plan',
   },
   {
+    id: 'pat-002',
     name: 'Jordan Patel',
     lastVisit: 'Jan 30, 2026',
     nextStep: 'Lab results review',
     status: 'Awaiting confirmation',
   },
   {
+    id: 'pat-003',
     name: 'Maya Rivera',
     lastVisit: 'Feb 2, 2026',
     nextStep: 'Telehealth check-in',
     status: 'Confirmed visit',
   },
   {
+    id: 'pat-004',
     name: 'Carlos Diaz',
     lastVisit: 'Feb 4, 2026',
     nextStep: 'Reschedule requested',
@@ -34,9 +38,9 @@ const PatientsPage = () => {
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold text-slate-900">My patients</h1>
-          <p className="mt-1 text-sm text-slate-600">
-            Track patient engagement and AI call outcomes from a doctor-only workspace.
-          </p>
+        <p className="mt-1 text-sm text-slate-600">
+          Manage patient records tied to appointments and call activity.
+        </p>
         </div>
         <button className="inline-flex items-center gap-2 rounded-full bg-primary px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-700">
           <Plus className="h-4 w-4" />
@@ -76,7 +80,7 @@ const PatientsPage = () => {
                   : 'success'
 
               return (
-                <tr key={patient.name} className="hover:bg-slate-50">
+                <tr key={patient.id} className="hover:bg-slate-50">
                   <td className="px-6 py-4 font-semibold text-slate-900">{patient.name}</td>
                   <td className="px-6 py-4 text-slate-600">{patient.lastVisit}</td>
                   <td className="px-6 py-4 text-slate-600">{patient.nextStep}</td>
@@ -86,12 +90,16 @@ const PatientsPage = () => {
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-3 text-xs font-semibold text-slate-600">
                       <button className="inline-flex items-center gap-1 text-primary">
-                        <PhoneCall className="h-3.5 w-3.5" />
-                        Call summary
+                        <Eye className="h-3.5 w-3.5" />
+                        View
                       </button>
                       <button className="inline-flex items-center gap-1 text-slate-500">
-                        <FileText className="h-3.5 w-3.5" />
-                        Notes
+                        <PencilLine className="h-3.5 w-3.5" />
+                        Edit
+                      </button>
+                      <button className="inline-flex items-center gap-1 text-rose-500">
+                        <Trash2 className="h-3.5 w-3.5" />
+                        Remove
                       </button>
                     </div>
                   </td>
