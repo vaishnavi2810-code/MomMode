@@ -13,6 +13,7 @@ Main FastAPI application with endpoints for:
 import sys
 from datetime import datetime
 from typing import List, Optional
+from sqlalchemy.orm import Session
 from fastapi import FastAPI, HTTPException, Depends, status, Request
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -72,7 +73,7 @@ print(f"{Fore.GREEN}✅ {config.APP_NAME} API initialized")
 
 def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security),
-    db: database.Session = Depends(database.get_db)
+    db: Session = Depends(database.get_db)
 ) -> str:
     """
     Extract and validate JWT token from Authorization header.
@@ -119,7 +120,7 @@ async def health_check():
 # ============================================================================
 
 @app.get("/api/auth/google/url", response_model=models.CalendarAuthUrl)
-async def get_google_auth_url(db: database.Session = Depends(database.get_db)):
+async def get_google_auth_url(db: Session = Depends(database.get_db)):
     """
     Get Google OAuth authorization URL for doctor login.
 
@@ -151,7 +152,7 @@ async def get_google_auth_url(db: database.Session = Depends(database.get_db)):
 @app.post("/api/auth/google/callback")
 async def google_oauth_callback(
     request: models.CalendarCallback,
-    db: database.Session = Depends(database.get_db)
+    db: Session = Depends(database.get_db)
 ):
     """
     Handle Google OAuth callback.
@@ -242,7 +243,7 @@ async def google_oauth_callback(
 async def logout(
     request: models.LogoutRequest,
     current_user: str = Depends(get_current_user),
-    db: database.Session = Depends(database.get_db)
+    db: Session = Depends(database.get_db)
 ):
     """
     Logout doctor (invalidate session).
@@ -298,7 +299,7 @@ async def get_doctor_profile():
 @app.get("/api/calendar/status", response_model=models.CalendarStatus)
 async def get_calendar_status(
     current_user: str = Depends(get_current_user),
-    db: database.Session = Depends(database.get_db)
+    db: Session = Depends(database.get_db)
 ):
     """
     Get current calendar connection status.
@@ -343,7 +344,7 @@ async def get_calendar_status(
 async def disconnect_calendar(
     request: models.CalendarDisconnect,
     current_user: str = Depends(get_current_user),
-    db: database.Session = Depends(database.get_db)
+    db: Session = Depends(database.get_db)
 ):
     """
     Disconnect Google Calendar.
@@ -380,7 +381,7 @@ async def disconnect_calendar(
 async def check_availability_endpoint(
     request: models.AvailabilityRequest,
     current_user: str = Depends(get_current_user),
-    db: database.Session = Depends(database.get_db)
+    db: Session = Depends(database.get_db)
 ):
     """
     Check available appointment slots for a given date.
@@ -515,7 +516,7 @@ async def list_appointments(
     skip: int = 0,
     limit: int = 100,
     current_user: str = Depends(get_current_user),
-    db: database.Session = Depends(database.get_db)
+    db: Session = Depends(database.get_db)
 ):
     """
     List all appointments for the authenticated doctor.
@@ -553,7 +554,7 @@ async def list_appointments(
 @app.get("/api/appointments/upcoming", response_model=models.UpcomingAppointmentsResponse)
 async def get_upcoming_appointments(
     current_user: str = Depends(get_current_user),
-    db: database.Session = Depends(database.get_db)
+    db: Session = Depends(database.get_db)
 ):
     """
     Get upcoming appointments for the next 30 days.
@@ -583,7 +584,7 @@ async def get_upcoming_appointments(
 async def create_appointment(
     request: models.AppointmentCreate,
     current_user: str = Depends(get_current_user),
-    db: database.Session = Depends(database.get_db)
+    db: Session = Depends(database.get_db)
 ):
     """
     Create new appointment.
