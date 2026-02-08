@@ -949,79 +949,218 @@ async def mark_calendar_appointment_no_show(
 # ============================================================================
 
 @app.get("/api/patients", response_model=List[models.PatientResponse])
-async def list_patients(skip: int = 0, limit: int = 100):
+async def list_patients(
+    skip: int = 0,
+    limit: int = 100,
+    current_user: str = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
     """
-    List all patients
+    List all patients belonging to the authenticated doctor.
+    """
+    try:
+        patients = db.query(database.Patient).filter(
+            database.Patient.doctor_id == current_user
+        ).offset(skip).limit(limit).all()
 
-    TODO: Fetch from database with pagination
-    """
-    return []
+        results = []
+        for patient in patients:
+            last_appt = db.query(database.Appointment).filter(
+                database.Appointment.patient_id == patient.id
+            ).order_by(database.Appointment.date.desc()).first()
+
+            results.append({
+                "id": patient.id,
+                "name": patient.name,
+                "phone": patient.phone,
+                "email": patient.email,
+                "notes": patient.notes,
+                "created_at": patient.created_at,
+                "last_appointment": (
+                    datetime.strptime(last_appt.date, DATE_INPUT_FORMAT)
+                    if last_appt and last_appt.date else None
+                ),
+            })
+        return results
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to list patients: {str(e)}"
+        )
 
 
 @app.post("/api/patients", response_model=models.PatientResponse)
-async def create_patient(request: models.PatientCreate):
+async def create_patient(
+    request: models.PatientCreate,
+    current_user: str = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
     """
-    Create new patient record
+    Create a new patient record for the authenticated doctor.
+    """
+    import uuid
 
-    TODO: Validate phone number format
-    TODO: Store in database
-    """
-    return {
-        "id": "pat_placeholder",
-        "name": request.name,
-        "phone": request.phone,
-        "email": request.email,
-        "notes": request.notes,
-        "created_at": datetime.utcnow(),
-        "last_appointment": None
-    }
+    try:
+        patient_id = f"pat_{uuid.uuid4().hex[:12]}"
+        patient = database.Patient(
+            id=patient_id,
+            doctor_id=current_user,
+            name=request.name,
+            phone=request.phone,
+            email=request.email,
+            notes=request.notes,
+        )
+        db.add(patient)
+        db.commit()
+        db.refresh(patient)
+
+        return {
+            "id": patient.id,
+            "name": patient.name,
+            "phone": patient.phone,
+            "email": patient.email,
+            "notes": patient.notes,
+            "created_at": patient.created_at,
+            "last_appointment": None,
+        }
+
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to create patient: {str(e)}"
+        )
 
 
 @app.get("/api/patients/{patient_id}", response_model=models.PatientResponse)
-async def get_patient(patient_id: str):
+async def get_patient(
+    patient_id: str,
+    current_user: str = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
     """
-    Get patient details
+    Get patient details by ID.
+    """
+    patient = db.query(database.Patient).filter(
+        database.Patient.id == patient_id,
+        database.Patient.doctor_id == current_user
+    ).first()
 
-    TODO: Fetch from database
-    """
+    if not patient:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=ERROR_APPOINTMENT_NOT_FOUND
+        )
+
+    last_appt = db.query(database.Appointment).filter(
+        database.Appointment.patient_id == patient.id
+    ).order_by(database.Appointment.date.desc()).first()
+
     return {
-        "id": patient_id,
-        "name": "Patient Name",
-        "phone": "+1234567890",
-        "email": "patient@example.com",
-        "notes": None,
-        "created_at": datetime.utcnow(),
-        "last_appointment": None
+        "id": patient.id,
+        "name": patient.name,
+        "phone": patient.phone,
+        "email": patient.email,
+        "notes": patient.notes,
+        "created_at": patient.created_at,
+        "last_appointment": (
+            datetime.strptime(last_appt.date, DATE_INPUT_FORMAT)
+            if last_appt and last_appt.date else None
+        ),
     }
 
 
 @app.put("/api/patients/{patient_id}", response_model=models.PatientResponse)
-async def update_patient(patient_id: str, request: models.PatientUpdate):
+async def update_patient(
+    patient_id: str,
+    request: models.PatientUpdate,
+    current_user: str = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
     """
-    Update patient record
+    Update an existing patient record.
+    """
+    patient = db.query(database.Patient).filter(
+        database.Patient.id == patient_id,
+        database.Patient.doctor_id == current_user
+    ).first()
 
-    TODO: Validate input
-    TODO: Update database
-    """
-    return {
-        "id": patient_id,
-        "name": request.name or "Patient Name",
-        "phone": request.phone or "+1234567890",
-        "email": request.email,
-        "notes": request.notes,
-        "created_at": datetime.utcnow(),
-        "last_appointment": None
-    }
+    if not patient:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=ERROR_APPOINTMENT_NOT_FOUND
+        )
+
+    try:
+        if request.name is not None:
+            patient.name = request.name
+        if request.phone is not None:
+            patient.phone = request.phone
+        if request.email is not None:
+            patient.email = request.email
+        if request.notes is not None:
+            patient.notes = request.notes
+
+        patient.updated_at = datetime.utcnow()
+        db.commit()
+        db.refresh(patient)
+
+        last_appt = db.query(database.Appointment).filter(
+            database.Appointment.patient_id == patient.id
+        ).order_by(database.Appointment.date.desc()).first()
+
+        return {
+            "id": patient.id,
+            "name": patient.name,
+            "phone": patient.phone,
+            "email": patient.email,
+            "notes": patient.notes,
+            "created_at": patient.created_at,
+            "last_appointment": (
+                datetime.strptime(last_appt.date, DATE_INPUT_FORMAT)
+                if last_appt and last_appt.date else None
+            ),
+        }
+
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to update patient: {str(e)}"
+        )
 
 
 @app.delete("/api/patients/{patient_id}")
-async def delete_patient(patient_id: str):
+async def delete_patient(
+    patient_id: str,
+    current_user: str = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
     """
-    Delete patient record
+    Delete a patient record. Removes the patient from the database.
+    """
+    patient = db.query(database.Patient).filter(
+        database.Patient.id == patient_id,
+        database.Patient.doctor_id == current_user
+    ).first()
 
-    TODO: Soft delete from database (archive instead of remove)
-    """
-    return {"success": True, "message": f"Patient {patient_id} deleted"}
+    if not patient:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=ERROR_APPOINTMENT_NOT_FOUND
+        )
+
+    try:
+        db.delete(patient)
+        db.commit()
+        return {"success": True, "message": f"Patient {patient_id} deleted"}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to delete patient: {str(e)}"
+        )
 
 
 # ============================================================================
@@ -1289,44 +1428,117 @@ async def mark_appointment_no_show(
 # ============================================================================
 
 @app.get("/api/calls", response_model=List[models.CallResponse])
-async def list_calls(skip: int = 0, limit: int = 100):
+async def list_calls(
+    skip: int = 0,
+    limit: int = 100,
+    current_user: str = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
     """
-    List all calls (inbound and outbound)
+    List all calls (inbound and outbound) for the authenticated doctor.
+    """
+    try:
+        calls = db.query(database.Call).filter(
+            database.Call.doctor_id == current_user
+        ).order_by(
+            database.Call.created_at.desc()
+        ).offset(skip).limit(limit).all()
 
-    TODO: Fetch from database with pagination
-    """
-    return []
+        return [
+            {
+                "id": call.id,
+                "call_sid": call.call_sid or "",
+                "patient_id": call.patient_id or "",
+                "patient_name": call.patient.name if call.patient else "",
+                "phone": call.phone_number,
+                "type": call.type or "",
+                "status": call.status or "",
+                "duration_seconds": call.duration_seconds or 0,
+                "started_at": call.started_at,
+                "ended_at": call.ended_at,
+                "created_at": call.created_at,
+            }
+            for call in calls
+        ]
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to list calls: {str(e)}"
+        )
 
 
 @app.get("/api/calls/scheduled", response_model=models.ScheduledCallsResponse)
-async def get_scheduled_calls():
+async def get_scheduled_calls(
+    current_user: str = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
     """
-    Get scheduled outbound calls
+    Get scheduled outbound calls for the authenticated doctor.
+    """
+    try:
+        calls = db.query(database.Call).filter(
+            database.Call.doctor_id == current_user,
+            database.Call.status.in_(["initiated", "scheduled", "ringing"])
+        ).order_by(database.Call.created_at.desc()).all()
 
-    TODO: Query database for upcoming calls
-    """
-    return {"count": 0, "calls": []}
+        call_list = [
+            {
+                "id": call.id,
+                "call_sid": call.call_sid or "",
+                "patient_id": call.patient_id or "",
+                "patient_name": call.patient.name if call.patient else "",
+                "phone": call.phone_number,
+                "type": call.type or "",
+                "status": call.status or "",
+                "duration_seconds": call.duration_seconds or 0,
+                "started_at": call.started_at,
+                "ended_at": call.ended_at,
+                "created_at": call.created_at,
+            }
+            for call in calls
+        ]
+        return {"count": len(call_list), "calls": call_list}
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to list scheduled calls: {str(e)}"
+        )
 
 
 @app.get("/api/calls/{call_id}", response_model=models.CallResponse)
-async def get_call(call_id: str):
+async def get_call(
+    call_id: str,
+    current_user: str = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
     """
-    Get call details
+    Get call details by ID.
+    """
+    call = db.query(database.Call).filter(
+        database.Call.id == call_id,
+        database.Call.doctor_id == current_user
+    ).first()
 
-    TODO: Fetch from database and Twilio
-    """
+    if not call:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Call not found"
+        )
+
     return {
-        "id": call_id,
-        "call_sid": "CA" + call_id,
-        "patient_id": "pat_placeholder",
-        "patient_name": "Patient Name",
-        "phone": "+1234567890",
-        "type": "reminder",
-        "status": "completed",
-        "duration_seconds": 120,
-        "started_at": datetime.utcnow(),
-        "ended_at": datetime.utcnow(),
-        "created_at": datetime.utcnow()
+        "id": call.id,
+        "call_sid": call.call_sid or "",
+        "patient_id": call.patient_id or "",
+        "patient_name": call.patient.name if call.patient else "",
+        "phone": call.phone_number,
+        "type": call.type or "",
+        "status": call.status or "",
+        "duration_seconds": call.duration_seconds or 0,
+        "started_at": call.started_at,
+        "ended_at": call.ended_at,
+        "created_at": call.created_at,
     }
 
 
