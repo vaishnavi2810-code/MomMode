@@ -1,7 +1,30 @@
+import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ArrowRight, HeartPulse, Lock, Mail } from 'lucide-react'
+import { apiRequest, API_PATHS, HTTP } from '../lib/api'
 
 const SignupPage = () => {
+  const [isLoading, setIsLoading] = useState(false)
+
+  const BUTTON_LABEL = 'Create account with Google'
+  const BUTTON_LOADING_LABEL = 'Redirecting...'
+  const AUTH_ERROR_MESSAGE = 'Unable to start Google sign-up.'
+
+  const handleGoogleSignup = async () => {
+    setIsLoading(true)
+    const result = await apiRequest<{ auth_url: string }>(API_PATHS.AUTH_GOOGLE_URL, {
+      method: HTTP.GET,
+    })
+    setIsLoading(false)
+
+    if (result.error || !result.data?.auth_url) {
+      console.error(AUTH_ERROR_MESSAGE, result.error)
+      return
+    }
+
+    window.location.assign(result.data.auth_url)
+  }
+
   return (
     <div className="min-h-screen bg-background px-6 py-12">
       <div className="mx-auto max-w-md">
@@ -55,13 +78,15 @@ const SignupPage = () => {
                 />
               </div>
             </label>
-            <Link
-              to="/connect-calendar"
-              className="flex w-full items-center justify-center gap-2 rounded-full bg-primary px-6 py-3 text-sm font-semibold text-white transition hover:bg-blue-700"
+            <button
+              type="button"
+              onClick={handleGoogleSignup}
+              className="flex w-full items-center justify-center gap-2 rounded-full bg-primary px-6 py-3 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-70"
+              disabled={isLoading}
             >
-              Create account
+              {isLoading ? BUTTON_LOADING_LABEL : BUTTON_LABEL}
               <ArrowRight className="h-4 w-4" />
-            </Link>
+            </button>
           </form>
 
           <div className="mt-5 text-xs text-slate-500">
