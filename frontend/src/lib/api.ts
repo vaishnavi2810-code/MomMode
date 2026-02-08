@@ -6,6 +6,11 @@ const BEARER_PREFIX = 'Bearer'
 const CONTENT_TYPE_HEADER = 'Content-Type'
 const CONTENT_TYPE_JSON = 'application/json'
 const EMPTY_STRING = ''
+const QUERY_SEPARATOR = '?'
+
+const ERROR_FIELD = 'error'
+const ERROR_DETAIL_FIELD = 'detail'
+const ERROR_MESSAGE_FIELD = 'message'
 
 const REQUEST_TIMEOUT_MS = 15000
 const MILLISECONDS_PER_SECOND = 1000
@@ -32,6 +37,8 @@ const HTTP_METHODS = {
   PUT: 'PUT',
   DELETE: 'DELETE',
 } as const
+
+const ERROR_MESSAGE_KEYS = [ERROR_FIELD, ERROR_DETAIL_FIELD, ERROR_MESSAGE_FIELD]
 
 const sanitizeBaseUrl = (value: string) => value.replace(/\/+$/, '')
 
@@ -84,6 +91,15 @@ export const API_PATHS = {
   SETTINGS: '/api/settings',
 } as const
 
+const APPOINTMENTS_PREFIX = `${API_PATHS.APPOINTMENTS}/`
+const AUTH_REQUIRED_PATHS = new Set<string>([
+  API_PATHS.CALENDAR_STATUS,
+  API_PATHS.CALENDAR_DISCONNECT,
+  API_PATHS.CALENDAR_CHECK_AVAILABILITY,
+  API_PATHS.APPOINTMENTS,
+  API_PATHS.APPOINTMENTS_UPCOMING,
+])
+
 export const HTTP = HTTP_METHODS
 export const ERRORS = ERROR_MESSAGES
 
@@ -121,15 +137,15 @@ export const apiRequest = async <T>(
   options: ApiRequestOptions = {},
 ): Promise<ApiResult<T>> => {
   const method = options.method ?? HTTP_METHODS.GET
-  const requiresAuth = options.requiresAuth ?? false
+  const requiresAuth = resolveRequiresAuth(path, options.requiresAuth)
   const headers: Record<string, string> = { ...(options.headers ?? {}) }
 
   if (options.body !== undefined) {
     headers[CONTENT_TYPE_HEADER] = CONTENT_TYPE_JSON
   }
 
+  const token = getAccessToken()
   if (requiresAuth) {
-    const token = getAccessToken()
     if (!token) {
       return {
         data: null,
@@ -156,9 +172,10 @@ export const apiRequest = async <T>(
     const responseBody = isJson ? await response.json() : await response.text()
 
     if (!response.ok) {
+      const errorMessage = extractErrorMessage(responseBody) ?? ERROR_MESSAGES.INVALID_RESPONSE
       return {
         data: null,
-        error: typeof responseBody === 'string' ? responseBody : ERROR_MESSAGES.INVALID_RESPONSE,
+        error: errorMessage,
         status: response.status,
       }
     }
@@ -180,6 +197,38 @@ export const apiRequest = async <T>(
 }
 
 const buildUrl = (path: string) => `${API_BASE_URL}/${path.replace(/^\/+/, EMPTY_STRING)}`
+
+const normalizePath = (path: string) => path.split(QUERY_SEPARATOR)[0] ?? path
+
+const isAuthRequiredPath = (path: string) => {
+  const normalizedPath = normalizePath(path)
+  return AUTH_REQUIRED_PATHS.has(normalizedPath) || normalizedPath.startsWith(APPOINTMENTS_PREFIX)
+}
+
+const resolveRequiresAuth = (path: string, requiresAuth?: boolean) => {
+  if (requiresAuth !== undefined) {
+    return requiresAuth
+  }
+  return isAuthRequiredPath(path)
+}
+
+const extractErrorMessage = (responseBody: unknown) => {
+  if (typeof responseBody === 'string') {
+    return responseBody
+  }
+
+  if (responseBody && typeof responseBody === 'object') {
+    const record = responseBody as Record<string, unknown>
+    for (const key of ERROR_MESSAGE_KEYS) {
+      const value = record[key]
+      if (typeof value === 'string' && value.trim().length > 0) {
+        return value
+      }
+    }
+  }
+
+  return null
+}
 
 const getStoredValue = (key: string) => {
   if (typeof window === 'undefined') {
