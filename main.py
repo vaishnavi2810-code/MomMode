@@ -13,9 +13,12 @@ Main FastAPI application with endpoints for:
 import sys
 from datetime import datetime
 from typing import List, Optional
-from fastapi import FastAPI, HTTPException, Depends, status, Request
-from fastapi.responses import JSONResponse
-from fastapi.security import HTTPBearer, HTTPAuthCredentials
+from sqlalchemy.orm import Session
+from fastapi import FastAPI, HTTPException, Depends, status, Request, Query
+from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.middleware.cors import CORSMiddleware
+from urllib.parse import urlencode
 from colorama import Fore, init
 
 import config
@@ -26,6 +29,34 @@ import calendar_service
 from twilio_wrapper import TwilioWrapper, TwilioCallError
 
 init(autoreset=True)
+
+# ============================================================================
+# CORS CONFIG
+# ============================================================================
+
+CORS_ALLOW_METHODS = ["*"]
+CORS_ALLOW_HEADERS = ["*"]
+CORS_ALLOW_CREDENTIALS = True
+
+OAUTH_REDIRECT_PARAM_ACCESS_TOKEN = "access_token"
+OAUTH_REDIRECT_PARAM_REFRESH_TOKEN = "refresh_token"
+OAUTH_REDIRECT_PARAM_TOKEN_TYPE = "token_type"
+OAUTH_REDIRECT_PARAM_EXPIRES_IN = "expires_in"
+OAUTH_REDIRECT_PARAM_USER_ID = "user_id"
+OAUTH_REDIRECT_QUERY_SEPARATOR = "?"
+OAUTH_REDIRECT_APPEND_SEPARATOR = "&"
+OAUTH_TOKEN_TYPE_BEARER = "bearer"
+
+
+def build_oauth_redirect_url(base_url: str, payload: dict) -> str:
+    """Build OAuth redirect URL with encoded query parameters."""
+    query_string = urlencode(payload)
+    separator = (
+        OAUTH_REDIRECT_APPEND_SEPARATOR
+        if OAUTH_REDIRECT_QUERY_SEPARATOR in base_url
+        else OAUTH_REDIRECT_QUERY_SEPARATOR
+    )
+    return f"{base_url}{separator}{query_string}"
 
 # ============================================================================
 # APPLICATION SETUP
@@ -53,6 +84,15 @@ app = FastAPI(
     debug=config.DEBUG
 )
 
+if config.CORS_ALLOWED_ORIGINS:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=config.CORS_ALLOWED_ORIGINS,
+        allow_credentials=CORS_ALLOW_CREDENTIALS,
+        allow_methods=CORS_ALLOW_METHODS,
+        allow_headers=CORS_ALLOW_HEADERS,
+    )
+
 # Initialize Twilio wrapper
 try:
     twilio = TwilioWrapper()
@@ -71,8 +111,8 @@ print(f"{Fore.GREEN}✅ {config.APP_NAME} API initialized")
 # ============================================================================
 
 def get_current_user(
-    credentials: HTTPAuthCredentials = Depends(security),
-    db: database.Session = Depends(database.get_db)
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: Session = Depends(database.get_db)
 ) -> str:
     """
     Extract and validate JWT token from Authorization header.
@@ -119,7 +159,7 @@ async def health_check():
 # ============================================================================
 
 @app.get("/api/auth/google/url", response_model=models.CalendarAuthUrl)
-async def get_google_auth_url(db: database.Session = Depends(database.get_db)):
+async def get_google_auth_url(db: Session = Depends(database.get_db)):
     """
     Get Google OAuth authorization URL for doctor login.
 
@@ -151,8 +191,21 @@ async def get_google_auth_url(db: database.Session = Depends(database.get_db)):
 @app.post("/api/auth/google/callback")
 async def google_oauth_callback(
     request: models.CalendarCallback,
-    db: database.Session = Depends(database.get_db)
+    db: Session = Depends(database.get_db)
 ):
+    return handle_google_oauth_callback(request.code, request.state, db)
+
+
+@app.get("/api/auth/google/callback")
+async def google_oauth_callback_get(
+    code: str = Query(...),
+    state: str = Query(...),
+    db: Session = Depends(database.get_db)
+):
+    return handle_google_oauth_callback(code, state, db)
+
+
+def handle_google_oauth_callback(code: str, state: str, db: Session):
     """
     Handle Google OAuth callback.
 
@@ -177,8 +230,8 @@ async def google_oauth_callback(
     try:
         # Exchange Google auth code for OAuth token
         oauth_token = auth_service.exchange_oauth_code_for_token(
-            request.code,
-            request.state
+            code,
+            state
         )
 
         if not oauth_token:
@@ -221,13 +274,22 @@ async def google_oauth_callback(
                 detail="Failed to create session"
             )
 
-        return {
-            "access_token": session.access_token,
-            "refresh_token": session.refresh_token,
-            "token_type": "bearer",
-            "expires_in": config.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
-            "user_id": user.id
+        response_payload = {
+            OAUTH_REDIRECT_PARAM_ACCESS_TOKEN: session.access_token,
+            OAUTH_REDIRECT_PARAM_REFRESH_TOKEN: session.refresh_token,
+            OAUTH_REDIRECT_PARAM_TOKEN_TYPE: OAUTH_TOKEN_TYPE_BEARER,
+            OAUTH_REDIRECT_PARAM_EXPIRES_IN: config.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+            OAUTH_REDIRECT_PARAM_USER_ID: user.id
         }
+
+        if config.FRONTEND_OAUTH_REDIRECT_URL:
+            redirect_url = build_oauth_redirect_url(
+                config.FRONTEND_OAUTH_REDIRECT_URL,
+                response_payload
+            )
+            return RedirectResponse(url=redirect_url)
+
+        return response_payload
 
     except HTTPException:
         raise
@@ -242,7 +304,7 @@ async def google_oauth_callback(
 async def logout(
     request: models.LogoutRequest,
     current_user: str = Depends(get_current_user),
-    db: database.Session = Depends(database.get_db)
+    db: Session = Depends(database.get_db)
 ):
     """
     Logout doctor (invalidate session).
@@ -298,7 +360,7 @@ async def get_doctor_profile():
 @app.get("/api/calendar/status", response_model=models.CalendarStatus)
 async def get_calendar_status(
     current_user: str = Depends(get_current_user),
-    db: database.Session = Depends(database.get_db)
+    db: Session = Depends(database.get_db)
 ):
     """
     Get current calendar connection status.
@@ -343,7 +405,7 @@ async def get_calendar_status(
 async def disconnect_calendar(
     request: models.CalendarDisconnect,
     current_user: str = Depends(get_current_user),
-    db: database.Session = Depends(database.get_db)
+    db: Session = Depends(database.get_db)
 ):
     """
     Disconnect Google Calendar.
@@ -380,7 +442,7 @@ async def disconnect_calendar(
 async def check_availability_endpoint(
     request: models.AvailabilityRequest,
     current_user: str = Depends(get_current_user),
-    db: database.Session = Depends(database.get_db)
+    db: Session = Depends(database.get_db)
 ):
     """
     Check available appointment slots for a given date.
@@ -515,7 +577,7 @@ async def list_appointments(
     skip: int = 0,
     limit: int = 100,
     current_user: str = Depends(get_current_user),
-    db: database.Session = Depends(database.get_db)
+    db: Session = Depends(database.get_db)
 ):
     """
     List all appointments for the authenticated doctor.
@@ -553,7 +615,7 @@ async def list_appointments(
 @app.get("/api/appointments/upcoming", response_model=models.UpcomingAppointmentsResponse)
 async def get_upcoming_appointments(
     current_user: str = Depends(get_current_user),
-    db: database.Session = Depends(database.get_db)
+    db: Session = Depends(database.get_db)
 ):
     """
     Get upcoming appointments for the next 30 days.
@@ -583,7 +645,7 @@ async def get_upcoming_appointments(
 async def create_appointment(
     request: models.AppointmentCreate,
     current_user: str = Depends(get_current_user),
-    db: database.Session = Depends(database.get_db)
+    db: Session = Depends(database.get_db)
 ):
     """
     Create new appointment.
@@ -926,7 +988,7 @@ async def http_exception_handler(request, exc):
         content={
             "success": False,
             "error": exc.detail,
-            "timestamp": datetime.utcnow()
+            "timestamp": datetime.utcnow().isoformat()
         }
     )
 
@@ -940,7 +1002,7 @@ async def general_exception_handler(request, exc):
         content={
             "success": False,
             "error": "Internal server error",
-            "timestamp": datetime.utcnow()
+            "timestamp": datetime.utcnow().isoformat()
         }
     )
 

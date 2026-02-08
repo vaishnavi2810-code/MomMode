@@ -22,6 +22,9 @@ from colorama import Fore, init
 
 init(autoreset=True)
 
+OAUTH_USERINFO_API_NAME = "oauth2"
+OAUTH_USERINFO_API_VERSION = "v2"
+
 # ============================================================================
 # PASSWORD HASHING
 # ============================================================================
@@ -139,12 +142,7 @@ def get_google_oauth_url() -> tuple[str, str]:
 
     flow = Flow.from_client_secrets_file(
         config.GOOGLE_CREDENTIALS_PATH,
-        scopes=[
-            "https://www.googleapis.com/auth/calendar",
-            "openid",
-            "email",
-            "profile"
-        ],
+        scopes=config.GOOGLE_OAUTH_SCOPES,
         redirect_uri=f"{config.API_BASE_URL}/api/auth/google/callback"
     )
 
@@ -169,12 +167,7 @@ def exchange_oauth_code_for_token(code: str, state: str) -> Optional[Dict[str, A
 
         flow = Flow.from_client_secrets_file(
             config.GOOGLE_CREDENTIALS_PATH,
-            scopes=[
-                "https://www.googleapis.com/auth/calendar",
-                "openid",
-                "email",
-                "profile"
-            ],
+            scopes=config.GOOGLE_OAUTH_SCOPES,
             redirect_uri=f"{config.API_BASE_URL}/api/auth/google/callback",
             state=state
         )
@@ -220,7 +213,7 @@ def get_user_info_from_google(access_token: str) -> Optional[Dict[str, Any]]:
 
         from googleapiclient.discovery import build
 
-        service = build("oauth2", "v1", credentials=credentials)
+        service = build(OAUTH_USERINFO_API_NAME, OAUTH_USERINFO_API_VERSION, credentials=credentials)
         user_info = service.userinfo().get().execute()
 
         return user_info
