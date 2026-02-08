@@ -1,10 +1,9 @@
 import type { ComponentType, SVGProps } from 'react'
-import type { LucideIcon } from 'lucide-react'
 
 type StatCardProps = {
   title: string
   value: string
-  change: string
+  change?: string
   icon: ComponentType<SVGProps<SVGSVGElement>>
   accent?: 'primary' | 'success' | 'warning'
 }
@@ -27,7 +26,7 @@ const StatCard = ({ title, value, change, icon: Icon, accent = 'primary' }: Stat
           <Icon className="h-5 w-5" />
         </div>
       </div>
-      <p className="mt-3 text-sm font-medium text-slate-500">{change}</p>
+      {change ? <p className="mt-3 text-sm font-medium text-slate-500">{change}</p> : null}
     </div>
   )
 }
