@@ -1,3 +1,8 @@
+# CallPilot API Requirements
+
+# FastAPI
+fastapi>=0.109.0
+uvicorn>=0.27.0
 # CallPilot Requirements
 
 # Google Calendar API
@@ -12,6 +17,21 @@ pydantic-settings>=2.1.0
 # Timezone handling
 pytz>=2024.1
 
+# API Framework
+fastapi>=0.109.0
+uvicorn>=0.27.0
+
+# Twilio (for voice calls - inbound/outbound)
+twilio>=8.10.0
+
+# ElevenLabs (AI voice agent)
+elevenlabs>=1.0.0
+
+# Scheduling (for reminder cron job)
+apscheduler>=3.10.0
+
+# Environment variables
+python-dotenv>=1.0.0
 # API Framework
 fastapi>=0.109.0
 uvicorn>=0.27.0
