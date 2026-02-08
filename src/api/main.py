@@ -1349,6 +1349,22 @@ async def create_appointment(
         )
 
 
+def find_appointment_by_id_or_calendar_id(db, doctor_id: str, appointment_id: str):
+    """Look up an appointment by local ID first, then by calendar_event_id."""
+    appointment = db.query(database.Appointment).filter(
+        database.Appointment.doctor_id == doctor_id,
+        database.Appointment.id == appointment_id
+    ).first()
+
+    if not appointment:
+        appointment = db.query(database.Appointment).filter(
+            database.Appointment.doctor_id == doctor_id,
+            database.Appointment.calendar_event_id == appointment_id
+        ).first()
+
+    return appointment
+
+
 @app.put("/api/appointments/{appointment_id}", response_model=models.AppointmentResponse)
 async def update_appointment(
     appointment_id: str,
@@ -1359,10 +1375,7 @@ async def update_appointment(
     """
     Update an existing appointment's details in the database.
     """
-    appointment = db.query(database.Appointment).filter(
-        database.Appointment.doctor_id == current_user,
-        database.Appointment.id == appointment_id
-    ).first()
+    appointment = find_appointment_by_id_or_calendar_id(db, current_user, appointment_id)
 
     if not appointment:
         raise HTTPException(
@@ -1420,10 +1433,7 @@ async def delete_appointment(
     """
     Cancel an appointment by setting its status to cancelled.
     """
-    appointment = db.query(database.Appointment).filter(
-        database.Appointment.doctor_id == current_user,
-        database.Appointment.id == appointment_id
-    ).first()
+    appointment = find_appointment_by_id_or_calendar_id(db, current_user, appointment_id)
 
     if not appointment:
         raise HTTPException(
@@ -1456,10 +1466,7 @@ async def confirm_appointment(
     """
     Confirm an appointment by setting its status to confirmed.
     """
-    appointment = db.query(database.Appointment).filter(
-        database.Appointment.doctor_id == current_user,
-        database.Appointment.id == appointment_id
-    ).first()
+    appointment = find_appointment_by_id_or_calendar_id(db, current_user, appointment_id)
 
     if not appointment:
         raise HTTPException(
