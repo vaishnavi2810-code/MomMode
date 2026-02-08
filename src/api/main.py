@@ -1663,36 +1663,84 @@ async def get_call(
 
 
 @app.post("/api/calls/manual", response_model=models.CallResponse)
-async def make_manual_call(request: models.CallCreate):
+async def make_manual_call(
+    request: models.CallCreate,
+    current_user: str = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
     """
-    Manually initiate outbound call to patient
+    Initiate an outbound call to a patient.
 
-    TODO: Validate patient exists
-    TODO: Initiate Twilio call
-    TODO: Store in database
+    Looks up the patient by ID, initiates a Twilio call to their
+    phone number, and stores the call record in the database.
     """
+    import uuid
+
+    # Look up patient to get their phone number
+    patient = db.query(database.Patient).filter(
+        database.Patient.id == request.patient_id,
+        database.Patient.doctor_id == current_user
+    ).first()
+
+    if not patient:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Patient not found"
+        )
+
+    call_id = f"call_{uuid.uuid4().hex[:12]}"
+    call_type = request.call_type or "manual"
+    now = datetime.utcnow()
+
     try:
-        result = twilio.make_outbound_call(
-            to_number="+1234567890",  # TODO: Get from patient
+        # Initiate Twilio call with real patient phone
+        twilio_result = twilio.make_outbound_call(
+            to_number=patient.phone,
             twiml_url=config.WEBHOOK_URL
         )
+
+        # Save call record to database
+        call_record = database.Call(
+            id=call_id,
+            doctor_id=current_user,
+            patient_id=patient.id,
+            call_sid=twilio_result["call_sid"],
+            direction="outbound",
+            type=call_type,
+            phone_number=patient.phone,
+            status=twilio_result.get("status", "initiated"),
+            duration_seconds=0,
+            started_at=now,
+            created_at=now,
+        )
+        db.add(call_record)
+        db.commit()
+
         return {
-            "id": "call_placeholder",
-            "call_sid": result["call_sid"],
-            "patient_id": request.patient_id,
-            "patient_name": "Patient Name",
-            "phone": "+1234567890",
-            "type": request.call_type or "manual",
-            "status": result["status"],
+            "id": call_id,
+            "call_sid": twilio_result["call_sid"],
+            "patient_id": patient.id,
+            "patient_name": patient.name,
+            "phone": patient.phone,
+            "type": call_type,
+            "status": twilio_result.get("status", "initiated"),
             "duration_seconds": 0,
-            "started_at": datetime.utcnow(),
+            "started_at": now,
             "ended_at": None,
-            "created_at": datetime.utcnow()
+            "created_at": now,
         }
+
     except TwilioCallError as e:
+        db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=config.ERROR_CALL_FAILED
+        )
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to schedule call: {str(e)}"
         )
 
 
