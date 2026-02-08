@@ -188,3 +188,5 @@ callpilot.db
 *.tmp
 *.temp
 .cache/
+
+frontend/node_modules
