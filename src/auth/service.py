@@ -119,17 +119,49 @@ def get_google_oauth_url() -> tuple[str, str]:
     Returns:
         tuple: (authorization_url, state_token)
     """
-    from google_auth_oauthlib.flow import Flow
+    print(f"{Fore.CYAN}[AUTH SERVICE] get_google_oauth_url() called")
 
-    flow = Flow.from_client_secrets_file(
-        config.GOOGLE_CREDENTIALS_PATH,
-        scopes=config.GOOGLE_OAUTH_SCOPES,
-        redirect_uri=f"{config.API_BASE_URL}/api/auth/google/callback"
-    )
+    try:
+        from google_auth_oauthlib.flow import Flow
 
-    auth_url, state = flow.authorization_url(access_type="offline", prompt="consent")
+        # Check if credentials file exists
+        cred_path = config.GOOGLE_CREDENTIALS_PATH
+        print(f"{Fore.CYAN}[AUTH SERVICE] Checking credentials at: {cred_path}")
 
-    return auth_url, state
+        if not os.path.exists(cred_path):
+            print(f"{Fore.RED}[AUTH SERVICE] ❌ Credentials file not found at: {cred_path}")
+            raise FileNotFoundError(f"Google credentials file not found at: {cred_path}")
+
+        print(f"{Fore.GREEN}[AUTH SERVICE] ✅ Credentials file exists")
+        print(f"{Fore.CYAN}[AUTH SERVICE] API Base URL: {config.API_BASE_URL}")
+        print(f"{Fore.CYAN}[AUTH SERVICE] Scopes: {config.GOOGLE_OAUTH_SCOPES}")
+
+        print(f"{Fore.CYAN}[AUTH SERVICE] Creating Flow from credentials...")
+        flow = Flow.from_client_secrets_file(
+            config.GOOGLE_CREDENTIALS_PATH,
+            scopes=config.GOOGLE_OAUTH_SCOPES,
+            redirect_uri=f"{config.API_BASE_URL}/api/auth/google/callback"
+        )
+
+        print(f"{Fore.GREEN}[AUTH SERVICE] ✅ Flow created successfully")
+
+        print(f"{Fore.CYAN}[AUTH SERVICE] Generating authorization URL...")
+        auth_url, state = flow.authorization_url(access_type="offline", prompt="consent")
+
+        print(f"{Fore.GREEN}[AUTH SERVICE] ✅ Auth URL generated")
+        print(f"{Fore.CYAN}[AUTH SERVICE] State token: {state}")
+
+        return auth_url, state
+
+    except FileNotFoundError as e:
+        print(f"{Fore.RED}[AUTH SERVICE] ❌ FileNotFoundError: {e}")
+        raise
+    except Exception as e:
+        print(f"{Fore.RED}[AUTH SERVICE] ❌ Error generating auth URL: {e}")
+        import traceback
+        print(f"{Fore.RED}[AUTH SERVICE] Traceback:")
+        traceback.print_exc()
+        raise
 
 
 def exchange_oauth_code_for_token(code: str, state: str) -> Optional[Dict[str, Any]]:

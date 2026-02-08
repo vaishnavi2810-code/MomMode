@@ -25,6 +25,8 @@ from src.core import models
 from src.database import models as database, SessionLocal, init_db, get_db, Session
 from src.auth import service as auth_service
 from src.calendar import service as calendar_service
+from src.services.calendar_service import CalendarService
+from src.core.auth import GoogleAuthManager
 from src.integrations.twilio import TwilioWrapper, TwilioCallError
 
 init(autoreset=True)
@@ -80,6 +82,22 @@ try:
     twilio = TwilioWrapper()
 except TwilioCallError as e:
     print(f"{Fore.RED}❌ Twilio initialization failed: {e}")
+    sys.exit(1)
+
+# Initialize Calendar Service
+try:
+    cal_service = CalendarService()
+    print(f"{Fore.GREEN}✅ Calendar Service initialized")
+except Exception as e:
+    print(f"{Fore.RED}❌ Calendar Service initialization failed: {e}")
+    sys.exit(1)
+
+# Initialize Google Auth Manager
+try:
+    google_auth = GoogleAuthManager()
+    print(f"{Fore.GREEN}✅ Google Auth Manager initialized")
+except Exception as e:
+    print(f"{Fore.RED}❌ Google Auth Manager initialization failed: {e}")
     sys.exit(1)
 
 # HTTP Bearer security for JWT tokens
@@ -155,15 +173,22 @@ async def get_google_auth_url(db: Session = Depends(get_db)):
 
     Returns:
         auth_url: URL to redirect user to Google OAuth
-        state: State token to prevent CSRF
     """
+    print(f"{Fore.CYAN}[AUTH] GET /api/auth/google/url called")
     try:
-        auth_url, state = auth_service.get_google_oauth_url()
+        print(f"{Fore.CYAN}[AUTH] Calling google_auth.get_auth_url()...")
+        auth_url = google_auth.get_auth_url()
+        print(f"{Fore.GREEN}[AUTH] ✅ Successfully generated auth URL")
+        print(f"{Fore.CYAN}[AUTH] Auth URL: {auth_url[:80]}...")
         return {
             "auth_url": auth_url,
-            "state": state
+            "state": ""
         }
     except Exception as e:
+        print(f"{Fore.RED}[AUTH] ❌ Error generating auth URL: {str(e)}")
+        import traceback
+        print(f"{Fore.RED}[AUTH] Traceback:")
+        traceback.print_exc()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to get auth URL: {str(e)}"
@@ -175,107 +200,84 @@ async def google_oauth_callback(
     request: models.CalendarCallback,
     db: Session = Depends(get_db)
 ):
+    print(f"{Fore.CYAN}[AUTH] POST /api/auth/google/callback received")
+    print(f"{Fore.CYAN}[AUTH]   Code (first 20 chars): {request.code[:20] if request.code else 'None'}...")
+    print(f"{Fore.CYAN}[AUTH]   State: {request.state}")
     return handle_google_oauth_callback(request.code, request.state, db)
 
 
 @app.get("/api/auth/google/callback")
 async def google_oauth_callback_get(
-    code: str = Query(...),
-    state: str = Query(...),
+    code: str = Query(None),
+    state: str = Query(None),
     db: Session = Depends(get_db)
 ):
-    return handle_google_oauth_callback(code, state, db)
+    print(f"{Fore.CYAN}[AUTH] GET /api/auth/google/callback received")
+    print(f"{Fore.CYAN}[AUTH]   Code: {code}")
+    print(f"{Fore.CYAN}[AUTH]   State: {state}")
+
+    if not code:
+        print(f"{Fore.RED}[AUTH] ❌ No authorization code received from Google")
+        return {
+            "success": False,
+            "error": "No authorization code received from Google"
+        }
+
+    return handle_google_oauth_callback(code, state or "", db)
 
 
 def handle_google_oauth_callback(code: str, state: str, db: Session):
     """
     Handle Google OAuth callback.
 
-    Backend Proxy Pattern - Step 1: Store OAuth Token
     1. User authorizes, Google redirects with code
-    2. Backend exchanges code for OAuth token
-    3. Stores token in database (encrypted)
-    4. Creates JWT session tokens
-
-    This is where the user's Google Calendar access is granted to our backend.
-    From this point on, we can call Calendar MCP with user's token via the proxy.
+    2. Backend exchanges code for OAuth token (saved to file)
+    3. User can now access Google Calendar
 
     Args:
         code: Authorization code from Google
         state: State token for CSRF protection
 
     Returns:
-        access_token: JWT token for API access
-        refresh_token: Token for refreshing access_token
-        user_id: User ID for reference
+        success: True if authentication succeeded
+        email: User's email address
+        message: Status message
     """
+    print(f"{Fore.CYAN}[AUTH] === GOOGLE OAUTH CALLBACK HANDLER START ===")
     try:
-        # Exchange Google auth code for OAuth token
-        oauth_token = auth_service.exchange_oauth_code_for_token(
-            code,
-            state
-        )
+        print(f"{Fore.CYAN}[AUTH] Step 1: Exchanging authorization code...")
+        print(f"{Fore.CYAN}[AUTH]   Code length: {len(code) if code else 0}")
 
-        if not oauth_token:
+        # Use GoogleAuthManager to handle the callback
+        success, message, email = google_auth.handle_callback(code)
+
+        if not success:
+            print(f"{Fore.RED}[AUTH] ❌ handle_callback failed: {message}")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Failed to exchange authorization code"
+                detail=message
             )
 
-        # Get user info from Google
-        user_info = auth_service.get_user_info_from_google(
-            oauth_token["access_token"]
-        )
+        print(f"{Fore.GREEN}[AUTH] ✅ OAuth authentication successful")
+        print(f"{Fore.CYAN}[AUTH]   Email: {email}")
+        print(f"{Fore.CYAN}[AUTH]   Message: {message}")
 
-        if not user_info:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Failed to get user info from Google"
-            )
+        print(f"{Fore.GREEN}[AUTH] ✅ === OAUTH CALLBACK HANDLER SUCCESS ===")
 
-        # Create or update user with OAuth token
-        user = auth_service.create_or_update_user(
-            db=db,
-            email=user_info["email"],
-            name=user_info.get("name", ""),
-            oauth_token_data=oauth_token
-        )
-
-        if not user:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to create user account"
-            )
-
-        # Create session with JWT tokens
-        session = auth_service.create_session(db, user.id)
-
-        if not session:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to create session"
-            )
-
-        response_payload = {
-            OAUTH_REDIRECT_PARAM_ACCESS_TOKEN: session.access_token,
-            OAUTH_REDIRECT_PARAM_REFRESH_TOKEN: session.refresh_token,
-            OAUTH_REDIRECT_PARAM_TOKEN_TYPE: OAUTH_TOKEN_TYPE_BEARER,
-            OAUTH_REDIRECT_PARAM_EXPIRES_IN: config.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
-            OAUTH_REDIRECT_PARAM_USER_ID: user.id
+        return {
+            "success": True,
+            "email": email,
+            "message": message
         }
 
-        if config.FRONTEND_OAUTH_REDIRECT_URL:
-            redirect_url = build_oauth_redirect_url(
-                config.FRONTEND_OAUTH_REDIRECT_URL,
-                response_payload
-            )
-            return RedirectResponse(url=redirect_url)
-
-        return response_payload
-
-    except HTTPException:
+    except HTTPException as e:
+        print(f"{Fore.RED}[AUTH] ❌ HTTPException in callback: {e.detail}")
         raise
     except Exception as e:
+        print(f"{Fore.RED}[AUTH] ❌ Unexpected error in callback: {str(e)}")
+        import traceback
+        print(f"{Fore.RED}[AUTH] Traceback:")
+        traceback.print_exc()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"OAuth callback failed: {str(e)}"
@@ -997,17 +999,28 @@ async def agent_check_availability(
     print(f"{Fore.CYAN}[AGENT API] check_availability called with date={date}")
 
     try:
-        # Use hardcoded doctor_id for single-tenant
-        doctor_id = "doctor_001"
+        # Use CalendarService to check availability
+        date_str, formatted_date, slots, message = cal_service.check_availability(date)
 
-        result = calendar_service.check_availability(
-            user_id=doctor_id,
-            db=db,
-            date=date
-        )
+        # Convert TimeSlot objects to dicts for JSON response
+        available_slots = [
+            {
+                "time": slot.formatted_time,
+                "date": slot.formatted_date,
+                "start": slot.start.isoformat(),
+                "end": slot.end.isoformat()
+            }
+            for slot in slots
+        ]
 
-        print(f"{Fore.GREEN}[AGENT API] ✅ check_availability returned: {len(result.get('available_slots', []))} slots")
-        return result
+        print(f"{Fore.GREEN}[AGENT API] ✅ check_availability returned: {len(available_slots)} slots")
+        return {
+            "success": True,
+            "date": date_str,
+            "formatted_date": formatted_date,
+            "available_slots": available_slots,
+            "message": message
+        }
 
     except Exception as e:
         print(f"{Fore.RED}[AGENT API] ❌ Error: {e}")
@@ -1142,31 +1155,49 @@ async def agent_schedule_appointment(
                 phone=phone_number
             )
             db.add(patient)
-            db.flush()
+            db.commit()
             print(f"{Fore.GREEN}[AGENT API] ✅ Created patient: {patient_id}")
         else:
             print(f"{Fore.GREEN}[AGENT API] ✅ Found existing patient: {patient.id}")
 
-        # Book appointment using calendar service
-        result = calendar_service.book_appointment(
-            user_id=doctor_id,
-            db=db,
-            patient_name=patient.name,
-            patient_phone=patient.phone,
-            date=date,
-            time=time,
-            appointment_type=appointment_type
+        # Parse datetime from date and time strings
+        from datetime import datetime as dt_parse
+        appointment_datetime = dt_parse.strptime(f"{date} {time}", "%Y-%m-%d %H:%M")
+
+        # Map appointment_type string to AppointmentType enum
+        from src.api.schemas.calendar import AppointmentType
+        appt_type_map = {
+            "General Checkup": AppointmentType.CHECKUP,
+            "Follow-up": AppointmentType.FOLLOW_UP,
+            "Consultation": AppointmentType.CONSULTATION,
+        }
+        appt_type = appt_type_map.get(appointment_type, AppointmentType.CHECKUP)
+
+        # Book appointment using CalendarService
+        success, message, confirmation_id, appointment = cal_service.create_appointment(
+            patient_name=patient_name,
+            patient_phone=phone_number,
+            appointment_datetime=appointment_datetime,
+            appointment_type=appt_type
         )
 
-        if not result["success"]:
-            print(f"{Fore.RED}[AGENT API] ❌ booking failed: {result.get('error')}")
+        if not success:
+            print(f"{Fore.RED}[AGENT API] ❌ booking failed: {message}")
             return {
                 "success": False,
-                "error": result.get("error", "Failed to book appointment")
+                "error": message
             }
 
-        print(f"{Fore.GREEN}[AGENT API] ✅ Appointment created: {result['appointment_id']}")
-        return result
+        print(f"{Fore.GREEN}[AGENT API] ✅ Appointment created: {confirmation_id}")
+        return {
+            "success": True,
+            "appointment_id": confirmation_id,
+            "confirmation_number": confirmation_id,
+            "message": message,
+            "patient_name": patient_name,
+            "date": date,
+            "time": time
+        }
 
     except Exception as e:
         print(f"{Fore.RED}[AGENT API] ❌ Error: {e}")
@@ -1211,7 +1242,7 @@ async def agent_reschedule_appointment(
     print(f"{Fore.CYAN}[AGENT API]   New date/time: {new_date} {new_time}")
 
     try:
-        # Verify patient owns this appointment
+        # Verify patient owns this appointment (check in Google Calendar via service)
         patient = db.query(database.Patient).filter(
             database.Patient.phone == phone_number
         ).first()
@@ -1223,30 +1254,24 @@ async def agent_reschedule_appointment(
                 "error": "Patient not found"
             }
 
-        appointment = db.query(database.Appointment).filter(
-            database.Appointment.id == appointment_id,
-            database.Appointment.patient_id == patient.id
-        ).first()
+        # Parse new datetime
+        from datetime import datetime as dt_parse
+        new_appointment_datetime = dt_parse.strptime(f"{new_date} {new_time}", "%Y-%m-%d %H:%M")
 
-        if not appointment:
-            print(f"{Fore.RED}[AGENT API] ❌ Appointment not found or doesn't belong to patient")
+        # Reschedule using CalendarService
+        success, message, appointment = cal_service.reschedule_appointment(
+            appointment_id=appointment_id,
+            new_datetime=new_appointment_datetime
+        )
+
+        if not success:
+            print(f"{Fore.RED}[AGENT API] ❌ Reschedule failed: {message}")
             return {
                 "success": False,
-                "error": "Appointment not found"
+                "error": message
             }
 
-        print(f"{Fore.GREEN}[AGENT API] ✅ Found appointment: {appointment.id}")
-
-        # Update appointment
-        old_date = appointment.date
-        old_time = appointment.time
-
-        appointment.date = new_date
-        appointment.time = new_time
-        appointment.updated_at = datetime.utcnow()
-        db.commit()
-
-        print(f"{Fore.GREEN}[AGENT API] ✅ Rescheduled from {old_date} {old_time} to {new_date} {new_time}")
+        print(f"{Fore.GREEN}[AGENT API] ✅ Rescheduled appointment {appointment_id} to {new_date} {new_time}")
 
         return {
             "success": True,
@@ -1258,7 +1283,6 @@ async def agent_reschedule_appointment(
         print(f"{Fore.RED}[AGENT API] ❌ Error: {e}")
         import traceback
         traceback.print_exc()
-        db.rollback()
         return {
             "success": False,
             "error": str(e)
@@ -1304,43 +1328,27 @@ async def agent_cancel_appointment(
                 "error": "Patient not found"
             }
 
-        appointment = db.query(database.Appointment).filter(
-            database.Appointment.id == appointment_id,
-            database.Appointment.patient_id == patient.id
-        ).first()
+        # Cancel appointment using CalendarService
+        success, message = cal_service.cancel_appointment(appointment_id=appointment_id)
 
-        if not appointment:
-            print(f"{Fore.RED}[AGENT API] ❌ Appointment not found or doesn't belong to patient")
+        if not success:
+            print(f"{Fore.RED}[AGENT API] ❌ Cancellation failed: {message}")
             return {
                 "success": False,
-                "error": "Appointment not found"
+                "error": message
             }
-
-        print(f"{Fore.GREEN}[AGENT API] ✅ Found appointment: {appointment.id}")
-
-        # Cancel appointment using calendar service
-        result = calendar_service.cancel_appointment(
-            user_id="doctor_001",
-            db=db,
-            appointment_id=appointment_id
-        )
-
-        if not result["success"]:
-            print(f"{Fore.RED}[AGENT API] ❌ Cancellation failed: {result.get('error')}")
-            return result
 
         print(f"{Fore.GREEN}[AGENT API] ✅ Appointment cancelled")
 
         return {
             "success": True,
-            "message": f"Your appointment on {appointment.date} at {appointment.time} has been cancelled"
+            "message": f"Your appointment has been cancelled. {message}"
         }
 
     except Exception as e:
         print(f"{Fore.RED}[AGENT API] ❌ Error: {e}")
         import traceback
         traceback.print_exc()
-        db.rollback()
         return {
             "success": False,
             "error": str(e)
