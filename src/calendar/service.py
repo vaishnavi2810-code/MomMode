@@ -15,7 +15,7 @@ token management in the backend.
 """
 
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date as date_type, time as time_type
 from typing import Optional, Dict, List, Any
 from sqlalchemy.orm import Session
 from src import config
@@ -25,6 +25,96 @@ import requests
 from colorama import Fore, init
 
 init(autoreset=True)
+
+DATE_FORMAT_ISO = "%Y-%m-%d"
+TIME_FORMAT_24H = "%H:%M"
+DATE_INPUT_FORMATS = (
+    DATE_FORMAT_ISO,
+    "%Y/%m/%d",
+    "%m/%d/%Y",
+    "%m-%d-%Y",
+)
+TIME_INPUT_FORMATS = (
+    TIME_FORMAT_24H,
+    "%H:%M:%S",
+    "%I:%M %p",
+    "%I %p",
+)
+DATE_TIME_SEPARATORS = ("T", " ")
+TIME_MERIDIEM_SUFFIXES = ("am", "pm")
+APPOINTMENT_STATUS_SCHEDULED = "scheduled"
+APPOINTMENT_STATUS_CONFIRMED = "confirmed"
+ACTIVE_APPOINTMENT_STATUSES = (
+    APPOINTMENT_STATUS_SCHEDULED,
+    APPOINTMENT_STATUS_CONFIRMED,
+)
+DEFAULT_SORT_TIME = datetime.min.time()
+
+
+def _extract_date_part(date_value: str) -> str:
+    for separator in DATE_TIME_SEPARATORS:
+        if separator in date_value:
+            return date_value.split(separator, 1)[0]
+    return date_value
+
+
+def _parse_date_value(date_value: Optional[str]) -> Optional[date_type]:
+    if not date_value:
+        return None
+    cleaned = date_value.strip()
+    if not cleaned:
+        return None
+    date_part = _extract_date_part(cleaned)
+    for fmt in DATE_INPUT_FORMATS:
+        try:
+            return datetime.strptime(date_part, fmt).date()
+        except ValueError:
+            continue
+    try:
+        return datetime.fromisoformat(cleaned).date()
+    except ValueError:
+        return None
+
+
+def _normalize_date_string(date_value: Optional[str]) -> Optional[str]:
+    parsed = _parse_date_value(date_value)
+    if not parsed:
+        return None
+    return parsed.strftime(DATE_FORMAT_ISO)
+
+
+def _normalize_meridiem_time_value(time_value: str) -> str:
+    lowered = time_value.lower()
+    if " " in lowered:
+        return lowered
+    for suffix in TIME_MERIDIEM_SUFFIXES:
+        if lowered.endswith(suffix):
+            return f"{lowered[:-len(suffix)]} {suffix}"
+    return lowered
+
+
+def _parse_time_value(time_value: Optional[str]) -> Optional[time_type]:
+    if not time_value:
+        return None
+    cleaned = time_value.strip()
+    if not cleaned:
+        return None
+    normalized = _normalize_meridiem_time_value(cleaned)
+    candidates = [cleaned, normalized, normalized.upper()]
+    for candidate in candidates:
+        for fmt in TIME_INPUT_FORMATS:
+            try:
+                return datetime.strptime(candidate, fmt).time()
+            except ValueError:
+                continue
+    return None
+
+
+def _normalize_time_string(time_value: Optional[str]) -> Optional[str]:
+    parsed = _parse_time_value(time_value)
+    if not parsed:
+        return None
+    return parsed.strftime(TIME_FORMAT_24H)
 
 
 class CalendarServiceError(Exception):
@@ -338,6 +428,13 @@ def book_appointment(
     print(f"{Fore.MAGENTA}[TOOL CALL]             date={date}, time={time}, type={appointment_type}")
 
     try:
+        normalized_date = _normalize_date_string(date) or date
+        normalized_time = _normalize_time_string(time) or time
+        date = normalized_date
+        time = normalized_time
+
+        appointment_status = APPOINTMENT_STATUS_SCHEDULED
+
         # Get doctor user
         print(f"{Fore.MAGENTA}[TOOL CALL] Looking up doctor user (user_id={user_id})...")
         doctor = auth_service.get_user_by_id(db, user_id)
@@ -382,7 +479,13 @@ def book_appointment(
             start_date=date,
             start_time=time,
             duration_minutes=config.APPOINTMENT_DURATION_MINUTES,
-            description=f"Patient: {patient_name}\nPhone: {patient_phone}\nType: {appointment_type}\nStatus: scheduled\nReminder Sent: false"
+            description=(
+                f"Patient: {patient_name}\n"
+                f"Phone: {patient_phone}\n"
+                f"Type: {appointment_type}\n"
+                f"Status: {appointment_status}\n"
+                "Reminder Sent: false"
+            )
         )
         print(f"{Fore.GREEN}[TOOL CALL] ✅ Calendar event created")
 
@@ -401,7 +504,7 @@ def book_appointment(
             date=date,
             time=time,
             type=appointment_type,
-            status="scheduled",
+            status=appointment_status,
             reminder_sent=False
         )
         db.add(appointment)
@@ -557,30 +660,44 @@ def get_upcoming_appointments(
     try:
         # Query upcoming appointments from database
         print(f"{Fore.MAGENTA}[TOOL CALL] Calculating future date cutoff...")
-        future_date = (datetime.utcnow() + timedelta(days=days_ahead)).date()
+        today = datetime.utcnow().date()
+        future_date = today + timedelta(days=days_ahead)
         print(f"{Fore.MAGENTA}[TOOL CALL] Looking up appointments through {future_date.isoformat()}...")
 
         appointments = db.query(database.Appointment).filter(
             database.Appointment.doctor_id == user_id,
-            database.Appointment.date <= future_date.isoformat(),
-            database.Appointment.status.in_(["scheduled", "confirmed"])
-        ).order_by(database.Appointment.date, database.Appointment.time).all()
+            database.Appointment.status.in_(ACTIVE_APPOINTMENT_STATUSES)
+        ).all()
 
-        print(f"{Fore.GREEN}[TOOL CALL] ✅ Found {len(appointments)} upcoming appointments")
+        upcoming = []
         for appt in appointments:
-            print(f"{Fore.GREEN}[TOOL CALL]   • {appt.date} {appt.time} - {appt.patient.name} ({appt.status})")
+            parsed_date = _parse_date_value(appt.date)
+            if not parsed_date:
+                continue
+            if parsed_date > future_date:
+                continue
+            parsed_time = _parse_time_value(appt.time) or DEFAULT_SORT_TIME
+            normalized_date = _normalize_date_string(appt.date) or appt.date
+            normalized_time = _normalize_time_string(appt.time) or appt.time
+            upcoming.append((parsed_date, parsed_time, appt, normalized_date, normalized_time))
+
+        upcoming.sort(key=lambda entry: (entry[0], entry[1]))
+
+        print(f"{Fore.GREEN}[TOOL CALL] ✅ Found {len(upcoming)} upcoming appointments")
+        for _, _, appt, normalized_date, normalized_time in upcoming:
+            print(f"{Fore.GREEN}[TOOL CALL]   • {normalized_date} {normalized_time} - {appt.patient.name} ({appt.status})")
 
         result = [
             {
                 "id": appt.id,
                 "patient_name": appt.patient.name,
                 "patient_phone": appt.patient.phone,
-                "date": appt.date,
-                "time": appt.time,
+                "date": normalized_date,
+                "time": normalized_time,
                 "type": appt.type,
                 "status": appt.status
             }
-            for appt in appointments
+            for _, _, appt, normalized_date, normalized_time in upcoming
         ]
 
         print(f"{Fore.GREEN}[TOOL CALL] ✅ Returning {len(result)} appointments to ElevenLabs")
