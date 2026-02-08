@@ -14,7 +14,7 @@ import sys
 from datetime import datetime
 from typing import List, Optional
 from sqlalchemy.orm import Session
-from fastapi import FastAPI, HTTPException, Depends, status, Request
+from fastapi import FastAPI, HTTPException, Depends, status, Request, Query
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.middleware.cors import CORSMiddleware
@@ -172,6 +172,19 @@ async def google_oauth_callback(
     request: models.CalendarCallback,
     db: Session = Depends(database.get_db)
 ):
+    return handle_google_oauth_callback(request.code, request.state, db)
+
+
+@app.get("/api/auth/google/callback")
+async def google_oauth_callback_get(
+    code: str = Query(...),
+    state: str = Query(...),
+    db: Session = Depends(database.get_db)
+):
+    return handle_google_oauth_callback(code, state, db)
+
+
+def handle_google_oauth_callback(code: str, state: str, db: Session):
     """
     Handle Google OAuth callback.
 
@@ -196,8 +209,8 @@ async def google_oauth_callback(
     try:
         # Exchange Google auth code for OAuth token
         oauth_token = auth_service.exchange_oauth_code_for_token(
-            request.code,
-            request.state
+            code,
+            state
         )
 
         if not oauth_token:
