@@ -35,6 +35,7 @@ const HTTP_METHODS = {
   GET: 'GET',
   POST: 'POST',
   PUT: 'PUT',
+  PATCH: 'PATCH',
   DELETE: 'DELETE',
 } as const
 
@@ -77,12 +78,14 @@ export const API_PATHS = {
   CALENDAR_DISCONNECT: '/api/calendar/disconnect',
   CALENDAR_CHECK_AVAILABILITY: '/api/calendar/check-availability',
   CALENDAR_APPOINTMENTS: '/api/calendar/appointments',
+  CALENDAR_APPOINTMENT_NO_SHOW: (appointmentId: string) => `/api/calendar/appointments/${appointmentId}/no-show`,
   PATIENTS: '/api/patients',
   PATIENT_BY_ID: (patientId: string) => `/api/patients/${patientId}`,
   APPOINTMENTS: '/api/appointments',
   APPOINTMENTS_UPCOMING: '/api/appointments/upcoming',
   APPOINTMENT_BY_ID: (appointmentId: string) => `/api/appointments/${appointmentId}`,
   APPOINTMENT_CONFIRM: (appointmentId: string) => `/api/appointments/${appointmentId}/confirm`,
+  APPOINTMENT_NO_SHOW: (appointmentId: string) => `/api/appointments/${appointmentId}/no-show`,
   CALLS: '/api/calls',
   CALLS_SCHEDULED: '/api/calls/scheduled',
   CALL_BY_ID: (callId: string) => `/api/calls/${callId}`,
