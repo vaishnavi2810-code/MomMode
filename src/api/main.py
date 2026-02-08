@@ -1693,10 +1693,15 @@ async def make_manual_call(
     now = datetime.utcnow()
 
     try:
+        # Build inline TwiML so Twilio doesn't need a public webhook URL
+        twiml_message = (
+            f"<Response><Say voice=\"alice\">{request.message}</Say></Response>"
+        )
+
         # Initiate Twilio call with real patient phone
         twilio_result = twilio.make_outbound_call(
             to_number=patient.phone,
-            twiml_url=config.WEBHOOK_URL
+            twiml_body=twiml_message,
         )
 
         # Save call record to database
