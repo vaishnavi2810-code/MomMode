@@ -4,6 +4,7 @@ import AppointmentsPage from './pages/AppointmentsPage'
 import CalendarConnectPage from './pages/CalendarConnectPage'
 import CallHistoryPage from './pages/CallHistoryPage'
 import DashboardPage from './pages/DashboardPage'
+import ApiReferencePage from './pages/ApiReferencePage'
 import SignupPage from './pages/SignupPage'
 import LandingPage from './pages/LandingPage'
 import LoginPage from './pages/LoginPage'
@@ -23,6 +24,7 @@ const App = () => {
         <Route path="patients" element={<PatientsPage />} />
         <Route path="appointments" element={<AppointmentsPage />} />
         <Route path="calls" element={<CallHistoryPage />} />
+        <Route path="api-reference" element={<ApiReferencePage />} />
         <Route path="settings" element={<SettingsPage />} />
       </Route>
       <Route path="*" element={<NotFoundPage />} />
