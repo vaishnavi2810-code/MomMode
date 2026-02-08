@@ -3,18 +3,68 @@
 # FastAPI
 fastapi>=0.109.0
 uvicorn>=0.27.0
+# CallPilot Requirements
 
 # Google Calendar API
 google-api-python-client>=2.100.0
 google-auth-httplib2>=0.1.0
 google-auth-oauthlib>=1.1.0
 
-# Data validation & settings
+# Data validation
 pydantic>=2.5.0
 pydantic-settings>=2.1.0
 
 # Timezone handling
 pytz>=2024.1
 
+# API Framework
+fastapi>=0.109.0
+uvicorn>=0.27.0
+
+# Twilio (for voice calls - inbound/outbound)
+twilio>=8.10.0
+
+# ElevenLabs (AI voice agent)
+elevenlabs>=1.0.0
+
+# Scheduling (for reminder cron job)
+apscheduler>=3.10.0
+
 # Environment variables
 python-dotenv>=1.0.0
+# API Framework
+fastapi>=0.109.0
+uvicorn>=0.27.0
+
+# Twilio (for voice calls - inbound/outbound)
+twilio>=8.10.0
+
+# ElevenLabs (AI voice agent)
+elevenlabs>=1.0.0
+
+# Scheduling (for reminder cron job)
+apscheduler>=3.10.0
+
+# Environment variables
+python-dotenv>=1.0.0
+
+# Database and ORM
+sqlalchemy>=2.0.0
+alembic>=1.12.0
+
+# Authentication & Security
+python-jose>=3.3.0
+passlib>=1.7.4
+bcrypt>=4.1.0
+python-multipart>=0.0.6
+
+# HTTP Requests
+requests>=2.31.0
+
+# Logging and CLI
+colorama>=0.4.6
+
+# Testing
+pytest>=7.4.0
+pytest-asyncio>=0.23.0
+httpx>=0.25.0

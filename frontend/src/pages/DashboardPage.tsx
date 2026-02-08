@@ -1,26 +1,298 @@
+import { useEffect, useState } from 'react'
 import { CalendarDays, Clock, PhoneCall, UsersRound } from 'lucide-react'
 import StatCard from '../components/StatCard'
 import StatusBadge from '../components/StatusBadge'
+import { apiRequest, API_PATHS, ERRORS, HTTP } from '../lib/api'
 
-const scheduledCalls = [
+type DashboardStats = {
+  total_patients: number
+  total_appointments: number
+  upcoming_appointments: number
+  completed_appointments: number
+  no_show_count: number
+  total_calls_made: number
+  successful_calls: number
+}
+
+type CallRecord = {
+  id: string
+  patient_name: string
+  phone: string
+  type: string
+  status: string
+  started_at?: string | null
+  created_at?: string | null
+}
+
+type ScheduledCallsResponse = {
+  count: number
+  calls: CallRecord[]
+}
+
+type AppointmentRecord = {
+  id: string
+  patient_name: string
+  date: string
+  time: string
+  type: string
+  status: string
+}
+
+type AttentionAppointment = {
+  id: string
+  patient: string
+  time: string
+  type: string
+  status: string
+}
+
+type AttentionMetrics = {
+  cancelledCount: number
+  noShowCount: number
+}
+
+type UpcomingAppointmentsResponse = {
+  count: number
+  appointments: AppointmentRecord[]
+}
+
+type DashboardActivity = {
+  recent_appointments: AppointmentRecord[]
+  recent_calls: CallRecord[]
+  upcoming_events: AppointmentRecord[]
+}
+
+const FALLBACK_SCHEDULED_CALLS = [
   { caller: 'Lydia Green', reason: 'Appointment confirmation', time: '11:00 AM', status: 'Scheduled' },
   { caller: 'Carlos Diaz', reason: 'Reschedule request', time: '12:30 PM', status: 'In progress' },
   { caller: 'Amanda Wu', reason: 'Reminder call', time: '3:15 PM', status: 'Scheduled' },
 ]
 
-const upcomingAppointments = [
+const FALLBACK_UPCOMING_APPOINTMENTS = [
   { patient: 'Hannah Lee', time: '11:30 AM', type: 'Annual physical', status: 'Confirmed' },
   { patient: 'Jordan Patel', time: '1:00 PM', type: 'Follow-up visit', status: 'Pending' },
   { patient: 'Maya Rivera', time: '2:15 PM', type: 'Telehealth check-in', status: 'Confirmed' },
 ]
 
-const recentActivity = [
+const FALLBACK_RECENT_ACTIVITY = [
   { title: 'Appointment confirmed', detail: 'Jordan Patel · Follow-up visit', time: '10 min ago' },
   { title: 'Patient record created', detail: 'Maya Rivera · New intake', time: '1 hour ago' },
   { title: 'Call completed', detail: 'Hannah Lee · Reminder call', time: '2 hours ago' },
 ]
 
+const FALLBACK_ATTENTION_APPOINTMENTS: AttentionAppointment[] = []
+const ZERO_COUNT = 0
+const APPOINTMENT_TIME_SEPARATOR = ' · '
+const APPOINTMENT_DATE_TIME_SEPARATOR = 'T'
+const DEFAULT_PATIENT_LABEL = 'Unknown patient'
+const DEFAULT_APPOINTMENT_TYPE = 'General'
+const STATUS_CANCELLED = 'cancelled'
+const STATUS_NO_SHOW = 'no_show'
+const ATTENTION_STATUS_LABEL_CANCELLED = 'Cancelled'
+const ATTENTION_STATUS_LABEL_NO_SHOW = 'No show'
+const ATTENTION_STATUS_LABELS: Record<string, string> = {
+  [STATUS_CANCELLED]: ATTENTION_STATUS_LABEL_CANCELLED,
+  [STATUS_NO_SHOW]: ATTENTION_STATUS_LABEL_NO_SHOW,
+}
+const ATTENTION_STATUSES = new Set([STATUS_CANCELLED, STATUS_NO_SHOW])
+const ATTENTION_SECTION_TITLE = 'Cancellations & no-shows'
+const ATTENTION_SECTION_SUBTITLE = 'Follow up on missed or cancelled visits.'
+const ATTENTION_EMPTY_TITLE = 'No cancellations or no-shows'
+const ATTENTION_EMPTY_MESSAGE = 'Missed or cancelled visits will appear here.'
+const ATTENTION_BADGE_EMPTY = 'All clear'
+const ATTENTION_BADGE_SUFFIX = 'flagged'
+const ATTENTION_LIST_LIMIT = 4
+const INVALID_APPOINTMENT_TIMESTAMP = Number.NEGATIVE_INFINITY
+const EMPTY_ATTENTION_METRICS: AttentionMetrics = {
+  cancelledCount: ZERO_COUNT,
+  noShowCount: ZERO_COUNT,
+}
+
+const STATUS_LOADING = 'Loading live dashboard metrics...'
+const STATUS_MISSING_TOKEN = 'Add access token to load protected data.'
+const STATUS_LOAD_ERROR = 'Unable to load live dashboard data.'
+const EMPTY_TIME_LABEL = 'TBD'
+
+const formatTimestamp = (value?: string | null) => {
+  if (!value) {
+    return EMPTY_TIME_LABEL
+  }
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) {
+    return EMPTY_TIME_LABEL
+  }
+  return parsed.toLocaleString()
+}
+
+const formatAppointmentDateTime = (appointment: AppointmentRecord) => {
+  if (!appointment.date || !appointment.time) {
+    return EMPTY_TIME_LABEL
+  }
+  return `${appointment.date}${APPOINTMENT_TIME_SEPARATOR}${appointment.time}`
+}
+
+const getAppointmentTimestamp = (appointment: AppointmentRecord) => {
+  if (!appointment.date || !appointment.time) {
+    return null
+  }
+  const parsed = new Date(`${appointment.date}${APPOINTMENT_DATE_TIME_SEPARATOR}${appointment.time}`)
+  if (Number.isNaN(parsed.getTime())) {
+    return null
+  }
+  return parsed.getTime()
+}
+
+const getAttentionStatusLabel = (status: string) => ATTENTION_STATUS_LABELS[status] ?? status
+
+const formatAttentionBadge = (count: number) =>
+  count === ZERO_COUNT ? ATTENTION_BADGE_EMPTY : `${count} ${ATTENTION_BADGE_SUFFIX}`
+
+const buildAttentionData = (appointments: AppointmentRecord[]) => {
+  const metrics: AttentionMetrics = { ...EMPTY_ATTENTION_METRICS }
+  const flaggedAppointments = appointments.filter((appointment) => ATTENTION_STATUSES.has(appointment.status))
+
+  for (const appointment of flaggedAppointments) {
+    if (appointment.status === STATUS_CANCELLED) {
+      metrics.cancelledCount += 1
+    }
+    if (appointment.status === STATUS_NO_SHOW) {
+      metrics.noShowCount += 1
+    }
+  }
+
+  const rows = [...flaggedAppointments]
+    .sort((first, second) => {
+      const firstTimestamp = getAppointmentTimestamp(first) ?? INVALID_APPOINTMENT_TIMESTAMP
+      const secondTimestamp = getAppointmentTimestamp(second) ?? INVALID_APPOINTMENT_TIMESTAMP
+      return secondTimestamp - firstTimestamp
+    })
+    .slice(0, ATTENTION_LIST_LIMIT)
+    .map((appointment) => ({
+      id: appointment.id,
+      patient: appointment.patient_name || DEFAULT_PATIENT_LABEL,
+      time: formatAppointmentDateTime(appointment),
+      type: appointment.type || DEFAULT_APPOINTMENT_TYPE,
+      status: appointment.status,
+    }))
+
+  return { rows, metrics }
+}
+
 const DashboardPage = () => {
+  const [stats, setStats] = useState<DashboardStats | null>(null)
+  const [scheduledCalls, setScheduledCalls] = useState(FALLBACK_SCHEDULED_CALLS)
+  const [upcomingAppointments, setUpcomingAppointments] = useState(FALLBACK_UPCOMING_APPOINTMENTS)
+  const [recentActivity, setRecentActivity] = useState(FALLBACK_RECENT_ACTIVITY)
+  const [attentionAppointments, setAttentionAppointments] = useState(FALLBACK_ATTENTION_APPOINTMENTS)
+  const [attentionMetrics, setAttentionMetrics] = useState<AttentionMetrics>(EMPTY_ATTENTION_METRICS)
+  const [statusMessage, setStatusMessage] = useState<string | null>(null)
+
+  const mapScheduledCalls = (calls: CallRecord[]) =>
+    calls.map((call) => ({
+      caller: call.patient_name || call.phone,
+      reason: call.type,
+      time: formatTimestamp(call.started_at ?? call.created_at),
+      status: call.status,
+    }))
+
+  const mapUpcomingAppointments = (appointments: AppointmentRecord[]) =>
+    appointments.map((appointment) => ({
+      patient: appointment.patient_name,
+      time: `${appointment.date} · ${appointment.time}`,
+      type: appointment.type,
+      status: appointment.status,
+    }))
+
+  const mapRecentActivity = (activity: DashboardActivity) => {
+    const appointmentActivities = activity.recent_appointments.map((appointment) => ({
+      title: 'Appointment updated',
+      detail: `${appointment.patient_name} · ${appointment.type}`,
+      time: `${appointment.date} ${appointment.time}`,
+    }))
+    const callActivities = activity.recent_calls.map((call) => ({
+      title: 'Call completed',
+      detail: `${call.patient_name} · ${call.type}`,
+      time: formatTimestamp(call.started_at ?? call.created_at),
+    }))
+    return [...appointmentActivities, ...callActivities].slice(0, FALLBACK_RECENT_ACTIVITY.length)
+  }
+
+  useEffect(() => {
+    const loadDashboard = async () => {
+      setStatusMessage(STATUS_LOADING)
+
+      const [statsResult, scheduledCallsResult, upcomingResult, activityResult, attentionResult] = await Promise.all([
+        apiRequest<DashboardStats>(API_PATHS.DASHBOARD_STATS, { method: HTTP.GET }),
+        apiRequest<ScheduledCallsResponse>(API_PATHS.CALLS_SCHEDULED, { method: HTTP.GET }),
+        apiRequest<UpcomingAppointmentsResponse>(API_PATHS.APPOINTMENTS_UPCOMING, {
+          method: HTTP.GET,
+          requiresAuth: true,
+        }),
+        apiRequest<DashboardActivity>(API_PATHS.DASHBOARD_ACTIVITY, { method: HTTP.GET }),
+        apiRequest<AppointmentRecord[]>(API_PATHS.APPOINTMENTS, { method: HTTP.GET, requiresAuth: true }),
+      ])
+
+      if (statsResult.data) {
+        setStats(statsResult.data)
+      }
+
+      if (scheduledCallsResult.data?.calls) {
+        setScheduledCalls(mapScheduledCalls(scheduledCallsResult.data.calls))
+      }
+
+      if (upcomingResult.data?.appointments) {
+        setUpcomingAppointments(mapUpcomingAppointments(upcomingResult.data.appointments))
+      }
+
+      if (activityResult.data) {
+        const mappedActivity = mapRecentActivity(activityResult.data)
+        if (mappedActivity.length > 0) {
+          setRecentActivity(mappedActivity)
+        }
+      }
+
+      if (attentionResult.data) {
+        const attentionData = buildAttentionData(attentionResult.data)
+        setAttentionAppointments(attentionData.rows)
+        setAttentionMetrics(attentionData.metrics)
+      } else if (attentionResult.error) {
+        setAttentionAppointments(FALLBACK_ATTENTION_APPOINTMENTS)
+        setAttentionMetrics(EMPTY_ATTENTION_METRICS)
+      }
+
+      const hasAuthError =
+        upcomingResult.error === ERRORS.MISSING_TOKEN || attentionResult.error === ERRORS.MISSING_TOKEN
+      const hasLoadError =
+        Boolean(statsResult.error || scheduledCallsResult.error || activityResult.error) ||
+        (upcomingResult.error && upcomingResult.error !== ERRORS.MISSING_TOKEN) ||
+        (attentionResult.error && attentionResult.error !== ERRORS.MISSING_TOKEN)
+
+      if (hasLoadError) {
+        setStatusMessage(STATUS_LOAD_ERROR)
+        return
+      }
+
+      if (hasAuthError) {
+        setStatusMessage(STATUS_MISSING_TOKEN)
+        return
+      }
+
+      setStatusMessage(null)
+    }
+
+    loadDashboard()
+  }, [])
+
+  const attentionTotalCount = attentionMetrics.cancelledCount + attentionMetrics.noShowCount
+  const resolvedNoShowCount = stats
+    ? stats.no_show_count > ZERO_COUNT
+      ? stats.no_show_count
+      : attentionMetrics.noShowCount
+    : attentionMetrics.noShowCount
+  const attentionBadgeLabel = formatAttentionBadge(attentionTotalCount)
+  const noShowValue = String(resolvedNoShowCount)
+  const hasAttentionAppointments = attentionAppointments.length > ZERO_COUNT
+
   return (
     <div className="space-y-8">
       <div>
@@ -28,33 +300,38 @@ const DashboardPage = () => {
         <p className="mt-1 text-sm text-slate-600">
           Monitor today&apos;s call coverage, appointments, and patient touchpoints.
         </p>
+        {statusMessage && (
+          <div className="mt-4">
+            <StatusBadge label={statusMessage} variant="info" />
+          </div>
+        )}
       </div>
 
       <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-4">
         <StatCard
           title="Calls handled"
-          value="128"
+          value={stats ? String(stats.total_calls_made) : '128'}
           change="+12% from yesterday"
           icon={PhoneCall}
           accent="primary"
         />
         <StatCard
           title="Upcoming appointments"
-          value="24"
+          value={stats ? String(stats.upcoming_appointments) : '24'}
           change="6 need confirmations"
           icon={CalendarDays}
           accent="success"
         />
         <StatCard
           title="Active patients"
-          value="128"
+          value={stats ? String(stats.total_patients) : '128'}
           change="12 added this month"
           icon={UsersRound}
           accent="warning"
         />
         <StatCard
-          title="Average call time"
-          value="2m 14s"
+          title="No-show count"
+          value={noShowValue}
           change="AI coverage running smoothly"
           icon={Clock}
           accent="primary"
@@ -120,6 +397,39 @@ const DashboardPage = () => {
                   </div>
                 </div>
               ))}
+            </div>
+          </div>
+
+          <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-soft">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h2 className="text-base font-semibold text-slate-900">{ATTENTION_SECTION_TITLE}</h2>
+                <p className="text-sm text-slate-600">{ATTENTION_SECTION_SUBTITLE}</p>
+              </div>
+              <StatusBadge label={attentionBadgeLabel} variant="warning" />
+            </div>
+            <div className="mt-5">
+              {hasAttentionAppointments ? (
+                <div className="space-y-4">
+                  {attentionAppointments.map((appointment) => (
+                    <div key={appointment.id} className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm font-semibold text-slate-900">{appointment.patient}</p>
+                        <p className="text-xs text-slate-500">{appointment.type}</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-xs text-slate-500">{appointment.time}</p>
+                        <StatusBadge label={getAttentionStatusLabel(appointment.status)} variant="warning" />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-5 py-4">
+                  <p className="text-sm font-semibold text-slate-700">{ATTENTION_EMPTY_TITLE}</p>
+                  <p className="mt-1 text-xs text-slate-500">{ATTENTION_EMPTY_MESSAGE}</p>
+                </div>
+              )}
             </div>
           </div>
 

@@ -10,26 +10,49 @@ from google.auth.transport.requests import Request
 from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
 
-from src.config import google_config
+from src import config
+
+# Named constants (can be overridden via environment variables)
+DEFAULT_TOKEN_FILE = "./token.json"
 
 
 class GoogleAuthManager:
     """Manages Google OAuth authentication."""
-    
+
     def __init__(self):
-        self.client_id = google_config.client_id
-        self.client_secret = google_config.client_secret
-        self.redirect_uri = google_config.redirect_uri
-        self.scopes = google_config.scopes
-        self.token_file = google_config.token_file
+        # Use old environment variable names for compatibility
+        self.client_id = os.getenv("GOOGLE_OAUTH_CLIENT_ID", "")
+        self.client_secret = os.getenv("GOOGLE_OAUTH_CLIENT_SECRET", "")
+        self.redirect_uri = os.getenv("GOOGLE_REDIRECT_URI", "")
+
+        # Validate required fields
+        if not self.redirect_uri:
+            raise ValueError("GOOGLE_REDIRECT_URI environment variable is required")
+
+        # Parse scopes from comma or space-separated string
+        scopes_str = os.getenv("GOOGLE_OAUTH_SCOPES", "")
+        if scopes_str:
+            # Handle both comma and space-separated formats
+            self.scopes = [s.strip() for s in scopes_str.replace(",", " ").split() if s.strip()]
+        else:
+            raise ValueError("GOOGLE_OAUTH_SCOPES environment variable is required")
+
+        # Token file uses DEFAULT_TOKEN_FILE constant (can be overridden via env var)
+        self.token_file = os.getenv("GOOGLE_TOKEN_FILE", DEFAULT_TOKEN_FILE)
     
     def get_auth_url(self) -> str:
         """
         Generate Google OAuth authorization URL.
-        
+
         Returns:
             Authorization URL to redirect user to
         """
+        print(f"[GOOGLE AUTH] get_auth_url() called")
+        print(f"[GOOGLE AUTH]   client_id: {self.client_id[:20] if self.client_id else 'MISSING'}...")
+        print(f"[GOOGLE AUTH]   client_secret: {self.client_secret[:20] if self.client_secret else 'MISSING'}...")
+        print(f"[GOOGLE AUTH]   redirect_uri: {self.redirect_uri}")
+        print(f"[GOOGLE AUTH]   scopes: {self.scopes}")
+
         flow = Flow.from_client_config(
             client_config={
                 "web": {
@@ -43,13 +66,17 @@ class GoogleAuthManager:
             scopes=self.scopes
         )
         flow.redirect_uri = self.redirect_uri
-        
-        auth_url, _ = flow.authorization_url(
+
+        auth_url, state = flow.authorization_url(
             access_type="offline",
             include_granted_scopes="true",
             prompt="consent"
         )
-        
+
+        print(f"[GOOGLE AUTH] ✅ Auth URL generated")
+        print(f"[GOOGLE AUTH]   Auth URL: {auth_url}")
+        print(f"[GOOGLE AUTH]   State: {state}")
+
         return auth_url
     
     def handle_callback(self, code: str) -> Tuple[bool, str, Optional[str]]:
