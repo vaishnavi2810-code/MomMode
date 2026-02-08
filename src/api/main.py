@@ -46,6 +46,8 @@ OAUTH_ERROR_USERINFO_FAILED = "Failed to get user info from Google"
 OAUTH_ERROR_CREATE_USER_FAILED = "Failed to create user account"
 OAUTH_ERROR_CREATE_SESSION_FAILED = "Failed to create session"
 OAUTH_ERROR_GENERIC = "Unable to complete Google sign-in"
+ERROR_DOCTOR_NOT_FOUND = "Doctor account not found."
+DEFAULT_DOCTOR_PHONE = ""
 CORS_ALLOW_METHODS = ["*"]
 CORS_ALLOW_HEADERS = ["*"]
 CORS_ALLOW_CREDENTIALS = True
@@ -345,21 +347,33 @@ def handle_google_oauth_callback(
 # ============================================================================
 
 @app.get("/api/doctors/me", response_model=models.DoctorProfile)
-async def get_doctor_profile():
+async def get_doctor_profile(
+    current_user: str = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
     """
     Get current doctor's profile
 
-    TODO: Extract doctor ID from JWT token
-    TODO: Fetch profile from database
+    Fetch profile from database.
     """
+    user = db.query(database.User).filter(
+        database.User.id == current_user
+    ).first()
+
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=ERROR_DOCTOR_NOT_FOUND
+        )
+
     return {
-        "id": "doc_placeholder",
-        "email": config.DOCTOR_EMAIL,
-        "name": "Dr. Placeholder",
-        "phone": "+1234567890",
-        "timezone": config.DOCTOR_TIMEZONE,
-        "calendar_connected": False,
-        "created_at": datetime.utcnow()
+        "id": user.id,
+        "email": user.email,
+        "name": user.name,
+        "phone": user.phone or DEFAULT_DOCTOR_PHONE,
+        "timezone": user.timezone or config.DOCTOR_TIMEZONE,
+        "calendar_connected": bool(user.google_oauth_token),
+        "created_at": user.created_at
     }
 
 
