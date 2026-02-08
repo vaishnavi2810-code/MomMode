@@ -1,10 +1,10 @@
-import { LucideIcon } from 'lucide-react'
+import type { ComponentType, SVGProps } from 'react'
 
 type StatCardProps = {
   title: string
   value: string
   change: string
-  icon: LucideIcon
+  icon: ComponentType<SVGProps<SVGSVGElement>>
   accent?: 'primary' | 'success' | 'warning'
 }
 
