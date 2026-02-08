@@ -26,10 +26,10 @@ os.environ["GOOGLE_CREDENTIALS_PATH"] = "./test_credentials.json"
 os.environ["API_BASE_URL"] = "http://localhost:8000"
 os.environ["WEBHOOK_URL"] = "http://localhost:8000/api/webhooks/elevenlabs"
 
-import config
-import database
-import auth_service
-from main import app
+from src import config
+from src.database import models as db_models, SessionLocal, init_db, get_db, Base, Session
+from src.auth import service as auth_service
+from src.api.main import app
 
 
 # ============================================================================
@@ -43,7 +43,7 @@ def engine():
         "sqlite:///:memory:",
         connect_args={"check_same_thread": False}
     )
-    database.Base.metadata.create_all(bind=engine)
+    Base.metadata.create_all(bind=engine)
     return engine
 
 
@@ -73,7 +73,7 @@ def client(db_session: Session) -> TestClient:
     def override_get_db():
         yield db_session
 
-    app.dependency_overrides[database.get_db] = override_get_db
+    app.dependency_overrides[get_db] = override_get_db
     return TestClient(app)
 
 
@@ -82,9 +82,9 @@ def client(db_session: Session) -> TestClient:
 # ============================================================================
 
 @pytest.fixture
-def sample_user(db_session: Session) -> database.User:
+def sample_user(db_session: Session) -> db_models.User:
     """Create a sample user for testing"""
-    user = database.User(
+    user = db_models.User(
         id="user_test_123",
         email="doctor@example.com",
         name="Dr. Test Smith",
@@ -99,7 +99,7 @@ def sample_user(db_session: Session) -> database.User:
 
 
 @pytest.fixture
-def sample_user_with_oauth(db_session: Session) -> database.User:
+def sample_user_with_oauth(db_session: Session) -> db_models.User:
     """Create a user with valid OAuth token"""
     oauth_token = {
         "access_token": "ya29.test_access_token_12345",
@@ -111,7 +111,7 @@ def sample_user_with_oauth(db_session: Session) -> database.User:
         "scopes": ["https://www.googleapis.com/auth/calendar"]
     }
 
-    user = database.User(
+    user = db_models.User(
         id="user_oauth_123",
         email="doctor_oauth@example.com",
         name="Dr. OAuth Test",
@@ -130,9 +130,9 @@ def sample_user_with_oauth(db_session: Session) -> database.User:
 
 
 @pytest.fixture
-def sample_patient(db_session: Session, sample_user: database.User) -> database.Patient:
+def sample_patient(db_session: Session, sample_user: db_models.User) -> db_models.Patient:
     """Create a sample patient"""
-    patient = database.Patient(
+    patient = db_models.Patient(
         id="pat_test_123",
         doctor_id=sample_user.id,
         name="John Doe",
@@ -149,11 +149,11 @@ def sample_patient(db_session: Session, sample_user: database.User) -> database.
 @pytest.fixture
 def sample_appointment(
     db_session: Session,
-    sample_user: database.User,
-    sample_patient: database.Patient
-) -> database.Appointment:
+    sample_user: db_models.User,
+    sample_patient: db_models.Patient
+) -> db_models.Appointment:
     """Create a sample appointment"""
-    appointment = database.Appointment(
+    appointment = db_models.Appointment(
         id="appt_test_123",
         doctor_id=sample_user.id,
         patient_id=sample_patient.id,
