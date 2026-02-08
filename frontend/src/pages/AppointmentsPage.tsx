@@ -219,8 +219,8 @@ const AppointmentsPage = () => {
       return
     }
 
-    const result = await apiRequest(API_PATHS.APPOINTMENT_NO_SHOW(appointmentId), {
-      method: HTTP.POST,
+    const result = await apiRequest(API_PATHS.CALENDAR_APPOINTMENT_NO_SHOW(appointmentId), {
+      method: HTTP.PATCH,
       requiresAuth: true,
     })
 

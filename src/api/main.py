@@ -55,6 +55,7 @@ ERROR_CALENDAR_DATE_INVALID = "Invalid date. Use YYYY-MM-DD or 'today'."
 ERROR_CALENDAR_FETCH_FAILED = "Failed to fetch calendar appointments."
 ERROR_APPOINTMENT_NOT_FOUND = "Appointment not found."
 ERROR_APPOINTMENT_NO_SHOW_FAILED = "Failed to mark appointment as no-show."
+ERROR_CALENDAR_EVENT_UPDATE_FAILED = "Failed to update calendar event."
 NO_SHOW_SUCCESS_MESSAGE = "Appointment marked as no-show."
 CALENDAR_TIMEZONE_FALLBACK = "UTC"
 CORS_ALLOW_METHODS = ["*"]
@@ -73,11 +74,15 @@ GOOGLE_CALENDAR_STATUS_FIELD = "status"
 GOOGLE_CALENDAR_STATUS_CANCELLED = "cancelled"
 APPOINTMENT_SUMMARY_PREFIX = "Appointment:"
 APPOINTMENT_SUMMARY_FALLBACK = "Appointment"
+APPOINTMENT_SUMMARY_SEPARATOR = " "
 APPOINTMENT_STATUS_SCHEDULED = "scheduled"
 APPOINTMENT_STATUS_CANCELLED = "cancelled"
 APPOINTMENT_STATUS_NO_SHOW = "no_show"
 APPOINTMENT_TYPE_FALLBACK = "General"
+SUMMARY_NO_SHOW_PREFIX = "NO SHOW:"
+SUMMARY_NO_SHOW_FALLBACK = f"{SUMMARY_NO_SHOW_PREFIX}{APPOINTMENT_SUMMARY_SEPARATOR}{APPOINTMENT_SUMMARY_FALLBACK}"
 DESCRIPTION_FIELD_SEPARATOR = ": "
+DESCRIPTION_LABEL_STATUS = "Status"
 DESCRIPTION_FIELD_STATUS = "status"
 DESCRIPTION_FIELD_TYPE = "type"
 DESCRIPTION_KEY_SEPARATOR = " "
@@ -165,6 +170,116 @@ def parse_description_fields(description: Optional[str]) -> Dict[str, str]:
         normalized_key = key.strip().lower().replace(DESCRIPTION_KEY_SEPARATOR, DESCRIPTION_KEY_REPLACEMENT)
         parsed[normalized_key] = value.strip()
     return parsed
+
+
+def update_description_field(description: Optional[str], field_label: str, value: str) -> str:
+    """Update or insert a field in the event description."""
+    field_prefix = f"{field_label}{DESCRIPTION_FIELD_SEPARATOR}"
+    if not description:
+        return f"{field_label}{DESCRIPTION_FIELD_SEPARATOR}{value}"
+
+    lines = description.splitlines()
+    updated_lines: List[str] = []
+    field_found = False
+
+    for line in lines:
+        if line.startswith(field_prefix):
+            updated_lines.append(f"{field_label}{DESCRIPTION_FIELD_SEPARATOR}{value}")
+            field_found = True
+        else:
+            updated_lines.append(line)
+
+    if not field_found:
+        updated_lines.append(f"{field_label}{DESCRIPTION_FIELD_SEPARATOR}{value}")
+
+    return "\n".join(updated_lines)
+
+
+def build_no_show_summary(summary: Optional[str]) -> str:
+    """Build summary string for a no-show event."""
+    if not summary:
+        return SUMMARY_NO_SHOW_FALLBACK
+
+    trimmed = summary.strip()
+    if not trimmed:
+        return SUMMARY_NO_SHOW_FALLBACK
+
+    if trimmed.lower().startswith(SUMMARY_NO_SHOW_PREFIX.lower()):
+        return trimmed
+
+    if trimmed.lower().startswith(APPOINTMENT_SUMMARY_PREFIX.lower()):
+        without_prefix = trimmed[len(APPOINTMENT_SUMMARY_PREFIX):].strip()
+        patient_label = without_prefix or APPOINTMENT_SUMMARY_FALLBACK
+        return f"{SUMMARY_NO_SHOW_PREFIX}{APPOINTMENT_SUMMARY_SEPARATOR}{patient_label}"
+
+    return f"{SUMMARY_NO_SHOW_PREFIX}{APPOINTMENT_SUMMARY_SEPARATOR}{trimmed}"
+
+
+def resolve_calendar_credentials(current_user: str, db: Session):
+    """Resolve calendar credentials and user context."""
+    user = auth_service.get_user_by_id(db, current_user)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=ERROR_DOCTOR_NOT_FOUND
+        )
+
+    oauth_token = auth_service.get_user_oauth_token(db, current_user)
+    if not oauth_token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=ERROR_CALENDAR_NOT_CONNECTED
+        )
+
+    credentials = auth_service.build_google_credentials(oauth_token)
+    if not credentials:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=ERROR_CALENDAR_NOT_CONNECTED
+        )
+
+    calendar_id = user.google_calendar_id or config.GOOGLE_CALENDAR_ID
+    return user, credentials, calendar_id
+
+
+def update_calendar_event_no_show(
+    *,
+    event_id: str,
+    calendar_id: str,
+    credentials
+) -> None:
+    """Update Google Calendar event to no-show status."""
+    service = build(GOOGLE_CALENDAR_API_NAME, GOOGLE_CALENDAR_API_VERSION, credentials=credentials)
+
+    try:
+        event = service.events().get(
+            calendarId=calendar_id,
+            eventId=event_id
+        ).execute()
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"{ERROR_APPOINTMENT_NOT_FOUND} {str(e)}"
+        )
+
+    description = event.get(GOOGLE_CALENDAR_DESCRIPTION_FIELD, "")
+    updated_description = update_description_field(description, DESCRIPTION_LABEL_STATUS, APPOINTMENT_STATUS_NO_SHOW)
+    updated_summary = build_no_show_summary(event.get(GOOGLE_CALENDAR_SUMMARY_FIELD))
+
+    event[GOOGLE_CALENDAR_DESCRIPTION_FIELD] = updated_description
+    event[GOOGLE_CALENDAR_SUMMARY_FIELD] = updated_summary
+
+    try:
+        service.events().update(
+            calendarId=calendar_id,
+            eventId=event_id,
+            body=event
+        ).execute()
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"{ERROR_CALENDAR_EVENT_UPDATE_FAILED} {str(e)}"
+        )
 
 
 def parse_event_datetime(value: Optional[str], timezone: pytz.BaseTzInfo) -> Optional[datetime]:
@@ -752,6 +867,37 @@ async def list_calendar_appointments(
         )
 
 
+@app.patch("/api/calendar/appointments/{appointment_id}/no-show")
+async def mark_calendar_appointment_no_show(
+    appointment_id: str,
+    current_user: str = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Mark a calendar appointment as no-show.
+    """
+    try:
+        _, credentials, calendar_id = resolve_calendar_credentials(current_user, db)
+        update_calendar_event_no_show(
+            event_id=appointment_id,
+            calendar_id=calendar_id,
+            credentials=credentials
+        )
+        return {
+            "success": True,
+            "message": NO_SHOW_SUCCESS_MESSAGE,
+            "appointment_id": appointment_id,
+            "status": APPOINTMENT_STATUS_NO_SHOW
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"{ERROR_APPOINTMENT_NO_SHOW_FAILED} {str(e)}"
+        )
+
+
 # ============================================================================
 # PATIENT ENDPOINTS (/api/patients)
 # ============================================================================
@@ -1050,6 +1196,8 @@ async def mark_appointment_no_show(
     Updates Google Calendar event and local appointment record when available.
     """
     try:
+        _, credentials, calendar_id = resolve_calendar_credentials(current_user, db)
+
         appointment = db.query(database.Appointment).filter(
             database.Appointment.doctor_id == current_user,
             database.Appointment.id == appointment_id
@@ -1062,15 +1210,11 @@ async def mark_appointment_no_show(
             ).first()
 
         calendar_event_id = appointment.calendar_event_id if appointment else appointment_id
-
-        result = calendar_service.mark_no_show(calendar_event_id)
-        if not result.get("success"):
-            fallback_error = ERROR_APPOINTMENT_NOT_FOUND if not appointment else ERROR_APPOINTMENT_NO_SHOW_FAILED
-            error_status = status.HTTP_404_NOT_FOUND if not appointment else status.HTTP_500_INTERNAL_SERVER_ERROR
-            raise HTTPException(
-                status_code=error_status,
-                detail=result.get("error", fallback_error)
-            )
+        update_calendar_event_no_show(
+            event_id=calendar_event_id,
+            calendar_id=calendar_id,
+            credentials=credentials
+        )
 
         if appointment:
             appointment.status = APPOINTMENT_STATUS_NO_SHOW
