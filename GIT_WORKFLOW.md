@@ -352,9 +352,13 @@ git merge branch3
 
 ## Additional Resources
 
-- [Official Git Documentation](https://git-scm.com/doc)
-- [Pro Git Book](https://git-scm.com/book/en/v2)
-- [Git Branching Model](https://nvie.com/posts/a-successful-git-branching-model/)
+- [Official Git Documentation](https://git-scm.com/doc) - Comprehensive reference for all Git commands
+- [Pro Git Book](https://git-scm.com/book/en/v2) - Free online book covering Git fundamentals and advanced topics
+- [Atlassian Git Tutorials](https://www.atlassian.com/git/tutorials) - Modern Git workflow guides and best practices
+- [GitHub Flow](https://docs.github.com/en/get-started/quickstart/github-flow) - Lightweight, branch-based workflow for modern teams
+- [Trunk Based Development](https://trunkbaseddevelopment.com/) - Modern branching strategy for CI/CD
+
+**Note**: Traditional branching models like Git Flow were designed for different release cycles. Modern development with CI/CD often favors simpler approaches like GitHub Flow or trunk-based development. Choose the workflow that best fits your team's needs and deployment strategy.
 
 ## Summary
 
