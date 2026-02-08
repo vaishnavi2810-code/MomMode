@@ -93,6 +93,20 @@ GOOGLE_OAUTH_CLIENT_SECRET = validate_required_var(
     "GOOGLE_OAUTH_CLIENT_SECRET",
     "Google OAuth client secret from Google Cloud Console"
 )
+DEFAULT_GOOGLE_OAUTH_SCOPES = (
+    "https://www.googleapis.com/auth/calendar,"
+    "openid,"
+    "https://www.googleapis.com/auth/userinfo.email,"
+    "https://www.googleapis.com/auth/userinfo.profile"
+)
+GOOGLE_OAUTH_SCOPES = [
+    scope.strip()
+    for scope in get_optional_var(
+        "GOOGLE_OAUTH_SCOPES",
+        DEFAULT_GOOGLE_OAUTH_SCOPES
+    ).split(",")
+    if scope.strip()
+]
 
 # ============================================================================
 # DOCTOR SETTINGS
