@@ -5,6 +5,7 @@ All /api/auth/* endpoints for OAuth handling.
 """
 
 from typing import Optional
+from urllib.parse import quote
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import RedirectResponse
 
@@ -24,14 +25,15 @@ def handle_google_callback(code: str = Query(...), state: Optional[str] = Query(
     success, message, email = auth_manager.handle_callback(code)
     
     if not success:
-        # Redirect to frontend with error
+        # Redirect to frontend with error (URL encode the message)
+        error_msg = quote(message)
         return RedirectResponse(
-            url=f"/connect-calendar?error={message}",
+            url=f"/connect-calendar?error={error_msg}",
             status_code=307
         )
     
     # Redirect to frontend with success
     return RedirectResponse(
-        url="/connect-calendar?success=true",
+        url=f"/connect-calendar?success=true&email={quote(email) if email else ''}",
         status_code=307
     )
