@@ -195,3 +195,5 @@ lerna-debug.log*
 *.tmp
 *.temp
 .cache/
+
+frontend/node_modules
