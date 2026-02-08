@@ -126,6 +126,16 @@ appointment_config = AppointmentConfig()
 app_config = AppConfig()
 
 # ============================================================================
+# APPOINTMENT CONFIG (top-level constants from Pydantic model)
+# ============================================================================
+APPOINTMENT_DURATION_MINUTES = int(
+    get_optional_var("APPOINTMENT_DURATION_MINUTES", str(appointment_config.duration_minutes))
+)
+APPOINTMENT_BUFFER_MINUTES = int(
+    get_optional_var("APPOINTMENT_BUFFER_MINUTES", str(appointment_config.buffer_minutes))
+)
+
+# ============================================================================
 # GOOGLE OAUTH CONFIG
 # ============================================================================
 DEFAULT_GOOGLE_CREDENTIALS_PATH = "./google_credentials.json"
