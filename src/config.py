@@ -7,13 +7,21 @@ NO HARDCODED VALUES - All config comes from environment or constants.
 
 import os
 import sys
+from pathlib import Path
 from dotenv import load_dotenv
 from colorama import Fore, init
 
 init(autoreset=True)
 
-# Load .env file
-load_dotenv()
+# Load .env file (default: repo root/.env)
+ENV_PATH_VAR = "ENV_PATH"
+ENV_FILENAME_VAR = "ENV_FILENAME"
+DEFAULT_ENV_FILENAME = ".env"
+ENV_FILENAME = os.getenv(ENV_FILENAME_VAR, DEFAULT_ENV_FILENAME)
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+DEFAULT_ENV_PATH = str(PROJECT_ROOT / ENV_FILENAME)
+ENV_PATH = os.getenv(ENV_PATH_VAR, DEFAULT_ENV_PATH)
+load_dotenv(dotenv_path=ENV_PATH)
 
 
 class ConfigError(Exception):
