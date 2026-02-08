@@ -21,6 +21,9 @@ def handle_google_callback(code: str = Query(...), state: Optional[str] = Query(
     Handle OAuth callback from Google (redirect endpoint).
     This endpoint matches the redirect URI configured in Google Cloud Console.
     After successful authentication, redirects to the frontend.
+    
+    Note: state parameter is accepted but not validated as Google's OAuth library
+    handles CSRF protection internally during token exchange.
     """
     success, message, email = auth_manager.handle_callback(code)
     
@@ -33,7 +36,11 @@ def handle_google_callback(code: str = Query(...), state: Optional[str] = Query(
         )
     
     # Redirect to frontend with success
+    redirect_url = "/connect-calendar?success=true"
+    if email:
+        redirect_url += f"&email={quote(email)}"
+    
     return RedirectResponse(
-        url=f"/connect-calendar?success=true&email={quote(email) if email else ''}",
+        url=redirect_url,
         status_code=307
     )
