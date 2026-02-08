@@ -1,4 +1,5 @@
-import { Bell, Building2, Shield, SlidersHorizontal } from 'lucide-react'
+import { Bell, Building2, CalendarDays } from 'lucide-react'
+import { Link } from 'react-router-dom'
 
 const SettingsPage = () => {
   return (
@@ -6,63 +7,104 @@ const SettingsPage = () => {
       <div>
         <h1 className="text-2xl font-semibold text-slate-900">Settings</h1>
         <p className="mt-1 text-sm text-slate-600">
-          Configure clinic preferences and AI calling policies.
+          Update clinic settings and notification preferences.
         </p>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-2">
+      <form className="space-y-6">
         <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-soft">
           <div className="flex items-center gap-3">
             <Building2 className="h-5 w-5 text-primary" />
-            <h2 className="text-base font-semibold text-slate-900">Clinic profile</h2>
+            <h2 className="text-base font-semibold text-slate-900">Clinic settings</h2>
           </div>
-          <p className="mt-3 text-sm text-slate-600">
-            Update office hours, practice name, and caller ID displayed by MomMode.
-          </p>
-          <button className="mt-4 rounded-full border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-600 transition hover:border-primary hover:text-primary">
-            Edit clinic profile
-          </button>
+          <div className="mt-4 grid gap-4 md:grid-cols-2">
+            <label className="block text-sm font-semibold text-slate-700">
+              Clinic name
+              <input
+                type="text"
+                placeholder="Summit Family Clinic"
+                className="mt-2 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-700 outline-none transition focus:border-primary focus:bg-white"
+              />
+            </label>
+            <label className="block text-sm font-semibold text-slate-700">
+              Timezone
+              <select
+                defaultValue="America/Los_Angeles"
+                className="mt-2 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-700 outline-none transition focus:border-primary focus:bg-white"
+              >
+                <option value="America/Los_Angeles">Pacific (US)</option>
+                <option value="America/Denver">Mountain (US)</option>
+                <option value="America/Chicago">Central (US)</option>
+                <option value="America/New_York">Eastern (US)</option>
+              </select>
+            </label>
+            <label className="block text-sm font-semibold text-slate-700">
+              Default appointment length (minutes)
+              <input
+                type="number"
+                min="10"
+                step="5"
+                placeholder="30"
+                className="mt-2 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-700 outline-none transition focus:border-primary focus:bg-white"
+              />
+            </label>
+            <label className="block text-sm font-semibold text-slate-700">
+              Clinic contact phone
+              <input
+                type="tel"
+                placeholder="(555) 555-0199"
+                className="mt-2 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-700 outline-none transition focus:border-primary focus:bg-white"
+              />
+            </label>
+          </div>
         </div>
 
         <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-soft">
           <div className="flex items-center gap-3">
             <Bell className="h-5 w-5 text-success" />
-            <h2 className="text-base font-semibold text-slate-900">Notification routing</h2>
+            <h2 className="text-base font-semibold text-slate-900">Notification preferences</h2>
           </div>
-          <p className="mt-3 text-sm text-slate-600">
-            Control which call outcomes notify staff and which remain AI-only.
-          </p>
-          <button className="mt-4 rounded-full border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-600 transition hover:border-primary hover:text-primary">
-            Manage alerts
-          </button>
+          <div className="mt-4 space-y-3 text-sm text-slate-600">
+            <label className="flex items-center gap-2">
+              <input type="checkbox" defaultChecked className="h-4 w-4 rounded border-slate-300" />
+              Notify staff on missed calls
+            </label>
+            <label className="flex items-center gap-2">
+              <input type="checkbox" defaultChecked className="h-4 w-4 rounded border-slate-300" />
+              Notify staff on appointment reschedules
+            </label>
+            <label className="flex items-center gap-2">
+              <input type="checkbox" className="h-4 w-4 rounded border-slate-300" />
+              Send confirmation reminders for upcoming appointments
+            </label>
+          </div>
         </div>
 
         <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-soft">
           <div className="flex items-center gap-3">
-            <SlidersHorizontal className="h-5 w-5 text-warning" />
-            <h2 className="text-base font-semibold text-slate-900">Call scripts</h2>
+            <CalendarDays className="h-5 w-5 text-primary" />
+            <h2 className="text-base font-semibold text-slate-900">Calendar connection</h2>
           </div>
           <p className="mt-3 text-sm text-slate-600">
-            Customize intake prompts and escalation rules used by the AI caller.
+            Manage Google Calendar access to keep availability and appointments in sync.
           </p>
-          <button className="mt-4 rounded-full border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-600 transition hover:border-primary hover:text-primary">
-            Edit scripts
-          </button>
+          <Link
+            to="/connect-calendar"
+            className="mt-4 inline-flex rounded-full border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-600 transition hover:border-primary hover:text-primary"
+          >
+            Manage calendar connection
+          </Link>
         </div>
 
-        <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-soft">
-          <div className="flex items-center gap-3">
-            <Shield className="h-5 w-5 text-primary" />
-            <h2 className="text-base font-semibold text-slate-900">Security & access</h2>
-          </div>
-          <p className="mt-3 text-sm text-slate-600">
-            Manage doctor-only access, audit logs, and data retention policies.
-          </p>
-          <button className="mt-4 rounded-full border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-600 transition hover:border-primary hover:text-primary">
-            Review policies
+        <div className="flex justify-end">
+          <button
+            type="button"
+            className="rounded-full bg-primary px-6 py-3 text-sm font-semibold text-white transition hover:bg-blue-700"
+          >
+            Save settings
           </button>
         </div>
-      </div>
+      </form>
     </div>
   )
 }
