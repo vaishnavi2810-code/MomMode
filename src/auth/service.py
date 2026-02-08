@@ -23,6 +23,17 @@ init(autoreset=True)
 
 OAUTH_USERINFO_API_NAME = "oauth2"
 OAUTH_USERINFO_API_VERSION = "v2"
+OAUTH_REDIRECT_PATH = "/api/auth/google/callback"
+OAUTH_URL_TRAILING_SLASH = "/"
+OAUTH_SCOPES = config.GOOGLE_OAUTH_SCOPES
+
+
+def resolve_oauth_redirect_uri() -> str:
+    """Resolve OAuth redirect URI for Google auth flow."""
+    if config.FRONTEND_OAUTH_REDIRECT_URL:
+        return config.FRONTEND_OAUTH_REDIRECT_URL
+    api_base = config.API_BASE_URL.rstrip(OAUTH_URL_TRAILING_SLASH)
+    return f"{api_base}{OAUTH_REDIRECT_PATH}"
 
 # ============================================================================
 # JWT TOKEN MANAGEMENT
@@ -123,13 +134,8 @@ def get_google_oauth_url() -> tuple[str, str]:
 
     flow = Flow.from_client_secrets_file(
         config.GOOGLE_CREDENTIALS_PATH,
-        scopes=[
-            "https://www.googleapis.com/auth/calendar",
-            "openid",
-            "email",
-            "profile"
-        ],
-        redirect_uri=f"{config.API_BASE_URL}/api/auth/google/callback"
+        scopes=OAUTH_SCOPES,
+        redirect_uri=resolve_oauth_redirect_uri()
     )
 
     auth_url, state = flow.authorization_url(access_type="offline", prompt="consent")
@@ -153,13 +159,8 @@ def exchange_oauth_code_for_token(code: str, state: str) -> Optional[Dict[str, A
 
         flow = Flow.from_client_secrets_file(
             config.GOOGLE_CREDENTIALS_PATH,
-            scopes=[
-                "https://www.googleapis.com/auth/calendar",
-                "openid",
-                "email",
-                "profile"
-            ],
-            redirect_uri=f"{config.API_BASE_URL}/api/auth/google/callback",
+            scopes=OAUTH_SCOPES,
+            redirect_uri=resolve_oauth_redirect_uri(),
             state=state
         )
 

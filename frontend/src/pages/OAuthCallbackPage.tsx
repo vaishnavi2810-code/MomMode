@@ -1,48 +1,85 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { storeSessionTokens } from '../lib/api'
+import { apiRequest, API_PATHS, HTTP, storeSessionTokens, type TokenResponse } from '../lib/api'
 
 const PAGE_TITLE = 'Signing you in'
 const PAGE_SUBTITLE = 'Completing Google authentication...'
 const ERROR_TITLE = 'Unable to complete sign-in'
-const ERROR_SUBTITLE = 'Missing access token from Google callback.'
 const REDIRECT_MESSAGE = 'Redirecting to your dashboard...'
+const ERROR_GENERIC = 'Unable to complete sign-in.'
+const ERROR_MISSING_CODE = 'Missing authorization code from Google callback.'
 
 const PARAM_ACCESS_TOKEN = 'access_token'
 const PARAM_REFRESH_TOKEN = 'refresh_token'
 const PARAM_TOKEN_TYPE = 'token_type'
 const PARAM_EXPIRES_IN = 'expires_in'
 const PARAM_USER_ID = 'user_id'
+const PARAM_CODE = 'code'
+const PARAM_STATE = 'state'
+const PARAM_ERROR = 'error'
+const PARAM_ERROR_DESCRIPTION = 'error_description'
 
 const DEFAULT_TOKEN_TYPE = 'bearer'
 const DEFAULT_EXPIRES_IN = 1800
+const DASHBOARD_ROUTE = '/app'
 
 const OAuthCallbackPage = () => {
   const navigate = useNavigate()
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
 
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search)
-    const accessToken = params.get(PARAM_ACCESS_TOKEN)
-    const refreshToken = params.get(PARAM_REFRESH_TOKEN) ?? ''
-    const tokenType = params.get(PARAM_TOKEN_TYPE) ?? DEFAULT_TOKEN_TYPE
-    const expiresIn = Number(params.get(PARAM_EXPIRES_IN)) || DEFAULT_EXPIRES_IN
-    const userId = params.get(PARAM_USER_ID) ?? undefined
+    const completeLogin = async () => {
+      const params = new URLSearchParams(window.location.search)
+      const error = params.get(PARAM_ERROR)
+      const errorDescription = params.get(PARAM_ERROR_DESCRIPTION)
 
-    if (!accessToken) {
-      setErrorMessage(ERROR_SUBTITLE)
-      return
+      if (error) {
+        setErrorMessage(errorDescription ?? error)
+        return
+      }
+
+      const accessToken = params.get(PARAM_ACCESS_TOKEN)
+      if (accessToken) {
+        const refreshToken = params.get(PARAM_REFRESH_TOKEN) ?? ''
+        const tokenType = params.get(PARAM_TOKEN_TYPE) ?? DEFAULT_TOKEN_TYPE
+        const expiresIn = Number(params.get(PARAM_EXPIRES_IN)) || DEFAULT_EXPIRES_IN
+        const userId = params.get(PARAM_USER_ID) ?? undefined
+
+        storeSessionTokens({
+          access_token: accessToken,
+          refresh_token: refreshToken,
+          token_type: tokenType,
+          expires_in: expiresIn,
+          user_id: userId,
+        })
+
+        navigate(DASHBOARD_ROUTE, { replace: true })
+        return
+      }
+
+      const code = params.get(PARAM_CODE)
+      const state = params.get(PARAM_STATE)
+
+      if (!code || !state) {
+        setErrorMessage(ERROR_MISSING_CODE)
+        return
+      }
+
+      const result = await apiRequest<TokenResponse>(API_PATHS.AUTH_GOOGLE_CALLBACK, {
+        method: HTTP.POST,
+        body: { code, state },
+      })
+
+      if (result.error || !result.data?.access_token) {
+        setErrorMessage(result.error ?? ERROR_GENERIC)
+        return
+      }
+
+      storeSessionTokens(result.data)
+      navigate(DASHBOARD_ROUTE, { replace: true })
     }
 
-    storeSessionTokens({
-      access_token: accessToken,
-      refresh_token: refreshToken,
-      token_type: tokenType,
-      expires_in: expiresIn,
-      user_id: userId,
-    })
-
-    navigate('/app', { replace: true })
+    completeLogin().catch(() => setErrorMessage(ERROR_GENERIC))
   }, [navigate])
 
   return (

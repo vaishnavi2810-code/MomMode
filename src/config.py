@@ -125,6 +125,31 @@ google_config = GoogleCalendarConfig()
 appointment_config = AppointmentConfig()
 app_config = AppConfig()
 
+# ============================================================================
+# GOOGLE OAUTH CONFIG
+# ============================================================================
+DEFAULT_GOOGLE_CREDENTIALS_PATH = "./google_credentials.json"
+GOOGLE_CREDENTIALS_PATH = get_optional_var(
+    "GOOGLE_CREDENTIALS_PATH",
+    DEFAULT_GOOGLE_CREDENTIALS_PATH
+)
+DEFAULT_GOOGLE_OAUTH_SCOPES = (
+    "https://www.googleapis.com/auth/calendar,"
+    "openid,"
+    "https://www.googleapis.com/auth/userinfo.email,"
+    "https://www.googleapis.com/auth/userinfo.profile"
+)
+GOOGLE_OAUTH_SCOPES_SEPARATOR = ","
+GOOGLE_OAUTH_SCOPES_RAW = get_optional_var(
+    "GOOGLE_OAUTH_SCOPES",
+    DEFAULT_GOOGLE_OAUTH_SCOPES
+)
+GOOGLE_OAUTH_SCOPES = [
+    scope.strip()
+    for scope in GOOGLE_OAUTH_SCOPES_RAW.split(GOOGLE_OAUTH_SCOPES_SEPARATOR)
+    if scope.strip()
+]
+
 
 # ============================================================================
 # ELEVENLABS CONFIG

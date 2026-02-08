@@ -35,9 +35,17 @@ OAUTH_REDIRECT_PARAM_REFRESH_TOKEN = "refresh_token"
 OAUTH_REDIRECT_PARAM_TOKEN_TYPE = "token_type"
 OAUTH_REDIRECT_PARAM_EXPIRES_IN = "expires_in"
 OAUTH_REDIRECT_PARAM_USER_ID = "user_id"
+OAUTH_REDIRECT_PARAM_ERROR = "error"
+OAUTH_REDIRECT_PARAM_ERROR_DESCRIPTION = "error_description"
 OAUTH_REDIRECT_QUERY_SEPARATOR = "?"
 OAUTH_REDIRECT_APPEND_SEPARATOR = "&"
 OAUTH_TOKEN_TYPE_BEARER = "bearer"
+OAUTH_CALLBACK_ERROR_TEMPLATE = "OAuth callback failed: {error}"
+OAUTH_ERROR_EXCHANGE_FAILED = "Failed to exchange authorization code"
+OAUTH_ERROR_USERINFO_FAILED = "Failed to get user info from Google"
+OAUTH_ERROR_CREATE_USER_FAILED = "Failed to create user account"
+OAUTH_ERROR_CREATE_SESSION_FAILED = "Failed to create session"
+OAUTH_ERROR_GENERIC = "Unable to complete Google sign-in"
 CORS_ALLOW_METHODS = ["*"]
 CORS_ALLOW_HEADERS = ["*"]
 CORS_ALLOW_CREDENTIALS = True
@@ -187,7 +195,13 @@ async def google_oauth_callback(
     request: models.CalendarCallback,
     db: Session = Depends(get_db)
 ):
-    return handle_google_oauth_callback(request.code, request.state, db)
+    return handle_google_oauth_callback(
+        request.code,
+        request.state,
+        db,
+        redirect_on_success=False,
+        redirect_on_error=False
+    )
 
 
 @app.get("/api/auth/google/callback")
@@ -196,10 +210,22 @@ async def google_oauth_callback_get(
     state: str = Query(...),
     db: Session = Depends(get_db)
 ):
-    return handle_google_oauth_callback(code, state, db)
+    return handle_google_oauth_callback(
+        code,
+        state,
+        db,
+        redirect_on_success=True,
+        redirect_on_error=True
+    )
 
 
-def handle_google_oauth_callback(code: str, state: str, db: Session):
+def handle_google_oauth_callback(
+    code: str,
+    state: str,
+    db: Session,
+    redirect_on_success: bool,
+    redirect_on_error: bool
+):
     """
     Handle Google OAuth callback.
 
@@ -231,7 +257,7 @@ def handle_google_oauth_callback(code: str, state: str, db: Session):
         if not oauth_token:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Failed to exchange authorization code"
+                detail=OAUTH_ERROR_EXCHANGE_FAILED
             )
 
         # Get user info from Google
@@ -242,7 +268,7 @@ def handle_google_oauth_callback(code: str, state: str, db: Session):
         if not user_info:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Failed to get user info from Google"
+                detail=OAUTH_ERROR_USERINFO_FAILED
             )
 
         # Create or update user with OAuth token
@@ -256,7 +282,7 @@ def handle_google_oauth_callback(code: str, state: str, db: Session):
         if not user:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to create user account"
+                detail=OAUTH_ERROR_CREATE_USER_FAILED
             )
 
         # Create session with JWT tokens
@@ -265,7 +291,7 @@ def handle_google_oauth_callback(code: str, state: str, db: Session):
         if not session:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to create session"
+                detail=OAUTH_ERROR_CREATE_SESSION_FAILED
             )
 
         response_payload = {
@@ -276,7 +302,7 @@ def handle_google_oauth_callback(code: str, state: str, db: Session):
             OAUTH_REDIRECT_PARAM_USER_ID: user.id
         }
 
-        if config.FRONTEND_OAUTH_REDIRECT_URL:
+        if redirect_on_success and config.FRONTEND_OAUTH_REDIRECT_URL:
             redirect_url = build_oauth_redirect_url(
                 config.FRONTEND_OAUTH_REDIRECT_URL,
                 response_payload
@@ -285,12 +311,32 @@ def handle_google_oauth_callback(code: str, state: str, db: Session):
 
         return response_payload
 
-    except HTTPException:
+    except HTTPException as exc:
+        if redirect_on_error and config.FRONTEND_OAUTH_REDIRECT_URL:
+            error_payload = {
+                OAUTH_REDIRECT_PARAM_ERROR: OAUTH_ERROR_GENERIC,
+                OAUTH_REDIRECT_PARAM_ERROR_DESCRIPTION: str(exc.detail)
+            }
+            redirect_url = build_oauth_redirect_url(
+                config.FRONTEND_OAUTH_REDIRECT_URL,
+                error_payload
+            )
+            return RedirectResponse(url=redirect_url)
         raise
     except Exception as e:
+        if redirect_on_error and config.FRONTEND_OAUTH_REDIRECT_URL:
+            error_payload = {
+                OAUTH_REDIRECT_PARAM_ERROR: OAUTH_ERROR_GENERIC,
+                OAUTH_REDIRECT_PARAM_ERROR_DESCRIPTION: str(e)
+            }
+            redirect_url = build_oauth_redirect_url(
+                config.FRONTEND_OAUTH_REDIRECT_URL,
+                error_payload
+            )
+            return RedirectResponse(url=redirect_url)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"OAuth callback failed: {str(e)}"
+            detail=OAUTH_CALLBACK_ERROR_TEMPLATE.format(error=str(e))
         )
 
 
