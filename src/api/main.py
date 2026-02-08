@@ -239,28 +239,6 @@ async def google_oauth_callback(
         )
 
 
-@app.post("/api/auth/logout")
-async def logout(
-    request: models.LogoutRequest,
-    current_user: str = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    """
-    Logout doctor (invalidate session).
-
-    Removes the session token from the database, requiring re-authentication.
-    """
-    try:
-        # TODO: Extract session ID from request/context
-        # For now, just return success
-        return {"success": True, "message": "Logged out successfully"}
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Logout failed: {str(e)}"
-        )
-
-
 # ============================================================================
 # DOCTOR ENDPOINTS (/api/doctors)
 # ============================================================================

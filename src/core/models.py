@@ -16,32 +16,14 @@ from pydantic import BaseModel, EmailStr, Field
 # ============================================================================
 # AUTHENTICATION MODELS
 # ============================================================================
-
-class SignupRequest(BaseModel):
-    """Request to create new doctor account"""
-    email: EmailStr
-    password: str = Field(..., min_length=8)
-    name: str = Field(..., min_length=1)
-    phone: str
-
-
-class LoginRequest(BaseModel):
-    """Request to authenticate doctor"""
-    email: EmailStr
-    password: str
-
+# NOTE: Uses Google OAuth only - no password-based auth
 
 class TokenResponse(BaseModel):
-    """JWT token response"""
+    """JWT token response from OAuth callback"""
     access_token: str
     refresh_token: str
     token_type: str = "bearer"
     expires_in: int
-
-
-class LogoutRequest(BaseModel):
-    """Request to logout"""
-    pass
 
 
 # ============================================================================

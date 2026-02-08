@@ -5,8 +5,6 @@ Core models and data structures.
 from src.core.models import *
 
 __all__ = [
-    "SignupRequest",
-    "LoginRequest",
     "TokenResponse",
     "DoctorProfile",
     "CalendarAuthUrl",

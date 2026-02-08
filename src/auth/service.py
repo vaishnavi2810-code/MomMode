@@ -14,31 +14,12 @@ import uuid
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
 from jose import JWTError, jwt
-from passlib.context import CryptContext
 from sqlalchemy.orm import Session
 from src import config
 from src import database
 from colorama import Fore, init
 
 init(autoreset=True)
-
-# ============================================================================
-# PASSWORD HASHING
-# ============================================================================
-
-# Use bcrypt for password hashing
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-
-
-def hash_password(password: str) -> str:
-    """Hash a password using bcrypt"""
-    return pwd_context.hash(password)
-
-
-def verify_password(plain_password: str, hashed_password: str) -> bool:
-    """Verify a plain password against a hashed password"""
-    return pwd_context.verify(plain_password, hashed_password)
-
 
 # ============================================================================
 # JWT TOKEN MANAGEMENT
