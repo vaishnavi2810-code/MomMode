@@ -1369,35 +1369,161 @@ async def make_manual_call(request: models.CallCreate):
 # ============================================================================
 
 @app.get("/api/dashboard/stats", response_model=models.DashboardStats)
-async def get_dashboard_stats():
+async def get_dashboard_stats(
+    current_user: str = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
     """
-    Get dashboard statistics
+    Get dashboard statistics calculated from the database.
 
-    TODO: Calculate from database
+    Counts patients, appointments (by status), and calls
+    belonging to the authenticated doctor.
     """
-    return {
-        "total_patients": 0,
-        "total_appointments": 0,
-        "upcoming_appointments": 0,
-        "completed_appointments": 0,
-        "no_show_count": 0,
-        "total_calls_made": 0,
-        "successful_calls": 0
-    }
+    from sqlalchemy import func
+
+    try:
+        total_patients = db.query(func.count(database.Patient.id)).filter(
+            database.Patient.doctor_id == current_user
+        ).scalar() or 0
+
+        total_appointments = db.query(func.count(database.Appointment.id)).filter(
+            database.Appointment.doctor_id == current_user
+        ).scalar() or 0
+
+        now_date = datetime.utcnow().strftime(DATE_OUTPUT_FORMAT)
+
+        upcoming_appointments = db.query(func.count(database.Appointment.id)).filter(
+            database.Appointment.doctor_id == current_user,
+            database.Appointment.date >= now_date,
+            database.Appointment.status.in_([
+                APPOINTMENT_STATUS_SCHEDULED, "confirmed"
+            ])
+        ).scalar() or 0
+
+        completed_appointments = db.query(func.count(database.Appointment.id)).filter(
+            database.Appointment.doctor_id == current_user,
+            database.Appointment.status == "completed"
+        ).scalar() or 0
+
+        no_show_count = db.query(func.count(database.Appointment.id)).filter(
+            database.Appointment.doctor_id == current_user,
+            database.Appointment.status == APPOINTMENT_STATUS_NO_SHOW
+        ).scalar() or 0
+
+        total_calls_made = db.query(func.count(database.Call.id)).filter(
+            database.Call.doctor_id == current_user
+        ).scalar() or 0
+
+        successful_calls = db.query(func.count(database.Call.id)).filter(
+            database.Call.doctor_id == current_user,
+            database.Call.status == "completed"
+        ).scalar() or 0
+
+        return {
+            "total_patients": total_patients,
+            "total_appointments": total_appointments,
+            "upcoming_appointments": upcoming_appointments,
+            "completed_appointments": completed_appointments,
+            "no_show_count": no_show_count,
+            "total_calls_made": total_calls_made,
+            "successful_calls": successful_calls,
+        }
+
+    except Exception as e:
+        print(f"{Fore.RED}[DASHBOARD] ❌ Failed to load stats: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to load dashboard stats: {str(e)}"
+        )
 
 
 @app.get("/api/dashboard/activity", response_model=models.DashboardActivity)
-async def get_dashboard_activity():
+async def get_dashboard_activity(
+    current_user: str = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
     """
-    Get recent activity (appointments, calls, upcoming events)
+    Get recent activity: latest appointments, calls, and upcoming events.
 
-    TODO: Query database for recent records
+    Queries the database for the most recent records belonging to the
+    authenticated doctor.
     """
-    return {
-        "recent_appointments": [],
-        "recent_calls": [],
-        "upcoming_events": []
-    }
+    RECENT_ACTIVITY_LIMIT = 5
+
+    try:
+        recent_appointments = db.query(database.Appointment).filter(
+            database.Appointment.doctor_id == current_user
+        ).order_by(
+            database.Appointment.updated_at.desc()
+        ).limit(RECENT_ACTIVITY_LIMIT).all()
+
+        recent_calls = db.query(database.Call).filter(
+            database.Call.doctor_id == current_user
+        ).order_by(
+            database.Call.created_at.desc()
+        ).limit(RECENT_ACTIVITY_LIMIT).all()
+
+        now_date = datetime.utcnow().strftime(DATE_OUTPUT_FORMAT)
+        upcoming_events = db.query(database.Appointment).filter(
+            database.Appointment.doctor_id == current_user,
+            database.Appointment.date >= now_date,
+            database.Appointment.status.in_([
+                APPOINTMENT_STATUS_SCHEDULED, "confirmed"
+            ])
+        ).order_by(
+            database.Appointment.date.asc(),
+            database.Appointment.time.asc()
+        ).limit(RECENT_ACTIVITY_LIMIT).all()
+
+        def appointment_to_dict(appt):
+            patient_name = APPOINTMENT_SUMMARY_FALLBACK
+            if appt.patient:
+                patient_name = appt.patient.name
+            return {
+                "id": appt.id,
+                "calendar_event_id": appt.calendar_event_id,
+                "patient_id": appt.patient_id,
+                "patient_name": patient_name,
+                "date": appt.date,
+                "time": appt.time,
+                "duration_minutes": appt.duration_minutes or config.APPOINTMENT_DURATION_MINUTES,
+                "type": appt.type or APPOINTMENT_TYPE_FALLBACK,
+                "status": appt.status or APPOINTMENT_STATUS_SCHEDULED,
+                "notes": appt.notes,
+                "reminder_sent": appt.reminder_sent or False,
+                "created_at": appt.created_at,
+            }
+
+        def call_to_dict(call):
+            patient_name = ""
+            if call.patient:
+                patient_name = call.patient.name
+            return {
+                "id": call.id,
+                "call_sid": call.call_sid or "",
+                "patient_id": call.patient_id or "",
+                "patient_name": patient_name,
+                "phone": call.phone_number,
+                "type": call.type or "",
+                "status": call.status or "",
+                "duration_seconds": call.duration_seconds or 0,
+                "started_at": call.started_at,
+                "ended_at": call.ended_at,
+                "created_at": call.created_at,
+            }
+
+        return {
+            "recent_appointments": [appointment_to_dict(a) for a in recent_appointments],
+            "recent_calls": [call_to_dict(c) for c in recent_calls],
+            "upcoming_events": [appointment_to_dict(a) for a in upcoming_events],
+        }
+
+    except Exception as e:
+        print(f"{Fore.RED}[DASHBOARD] ❌ Failed to load activity: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to load dashboard activity: {str(e)}"
+        )
 
 
 # ============================================================================
